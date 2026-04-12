@@ -18,7 +18,7 @@ pub fn compile(func: Function) {
     for stmt in func.body {
         match stmt {
             Stmt::Print(Expr::Int(val)) => {
-                // 2. Append 'LL' to the integer so GCC knows it is a 64-bit integer
+                // 2. Append 'LL' to the integer so G++ knows it is a 64-bit integer
                 c_code.push_str(&format!("    printf(\"%lld\\n\", {}LL);\n", val));
             }
         }
@@ -31,12 +31,12 @@ pub fn compile(func: Function) {
         c_code.push_str(&format!("\nint main() {{\n    return {}();\n}}\n", safe_name));
     }
 
-    fs::write("output.c", &c_code).expect("Failed to write C code");
+    fs::write("output.cpp", &c_code).expect("Failed to write C++ code");
 
-    let status = Command::new("gcc")
-        .args(&["-O3", "output.c", "-o", "main_program"])
+    let status = Command::new("g++")
+        .args(&["-O3", "output.cpp", "-o", "main_program"])
         .status()
-        .expect("Failed to invoke gcc. Is it installed?");
+        .expect("Failed to invoke g++. Is it installed?");
 
     if status.success() {
         println!("[compiled]");
