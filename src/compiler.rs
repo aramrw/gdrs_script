@@ -1,5 +1,3 @@
-use chumsky::prelude::*;
-use std::env; // Added for command line arguments
 use std::fs;
 use std::process::Command;
 use crate::ast::*;
@@ -21,6 +19,8 @@ pub fn compile(func: Function) {
                 // 2. Append 'LL' to the integer so G++ knows it is a 64-bit integer
                 c_code.push_str(&format!("    printf(\"%lld\\n\", {}LL);\n", val));
             }
+            Stmt::Print(_) => unimplemented!("Non-int expressions not yet supported in print"),
+            Stmt::VarDecl { .. } => unimplemented!("Variable declarations not yet supported in compiler"),
         }
     }
 
