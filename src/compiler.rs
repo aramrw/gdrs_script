@@ -15,12 +15,22 @@ pub fn compile(func: Function) {
 
     for stmt in func.body {
         match stmt {
-            Stmt::Print(Expr::Int(val)) => {
-                // 2. Append 'LL' to the integer so G++ knows it is a 64-bit integer
-                c_code.push_str(&format!("    printf(\"%lld\\n\", {}LL);\n", val));
+            Stmt::VarDecl { name, is_mutable, ty, value } => {
+                let const_kw = if is_mutable { "" } else { "const " };
+                let type_str = match ty { Type::I32 => "int32_t" };
+                let val_str = match value { 
+                    Expr::Int(v) => format!("{}LL", v),
+                    Expr::Variable(n) => n.clone(),
+                };
+                c_code.push_str(&format!("    {}{} {} = {};\n", const_kw, type_str, name, val_str));
             }
-            Stmt::Print(_) => unimplemented!("Non-int expressions not yet supported in print"),
-            Stmt::VarDecl { .. } => unimplemented!("Variable declarations not yet supported in compiler"),
+            Stmt::Print(expr) => {
+                let val_str = match expr {
+                    Expr::Int(v) => format!("{}LL", v),
+                    Expr::Variable(n) => n.clone(),
+                };
+                c_code.push_str(&format!("    printf(\"%lld\\n\", {});\n", val_str));
+            }
         }
     }
 
