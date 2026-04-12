@@ -19,17 +19,17 @@ pub fn compile(func: Function) {
                 let const_kw = if is_mutable { "" } else { "const " };
                 let type_str = match ty { Type::I32 => "int32_t" };
                 let val_str = match value { 
-                    Expr::Int(v) => format!("{}LL", v),
+                    Expr::Int(v) => format!("{}", v),
                     Expr::Variable(n) => n.clone(),
                 };
                 c_code.push_str(&format!("    {}{} {} = {};\n", const_kw, type_str, name, val_str));
             }
             Stmt::Print(expr) => {
                 let val_str = match expr {
-                    Expr::Int(v) => format!("{}LL", v),
+                    Expr::Int(v) => format!("{}", v),
                     Expr::Variable(n) => n.clone(),
                 };
-                c_code.push_str(&format!("    printf(\"%lld\\n\", {});\n", val_str));
+                c_code.push_str(&format!("    printf(\"%d\\n\", {});\n", val_str));
             }
         }
     }
