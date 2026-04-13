@@ -14,15 +14,17 @@ fn compile_id(name: &str) -> TokenStream {
     // Check for explicit rust mapping
     if let Ok(mappings) = RUST_MAPPINGS.lock() {
         if let Some(rust_path) = mappings.get(name) {
-            let parts: Vec<TokenStream> = rust_path
-                .split("::")
-                .map(|p| {
-                    let id = quote::format_ident!("{}", p);
-                    quote!(#id)
-                })
-                .collect();
-            return quote!(#( #parts )::*);
+            return rust_path
+                .parse()
+                .expect("Failed to parse rust mapping as TokenStream");
         }
+    }
+
+    // Check if it's already a complex Rust path (generics, pointers, etc.)
+    if name.contains('<') || name.contains('(') || name.contains('[') || name.contains('*') {
+        return name
+            .parse()
+            .expect("Failed to parse complex rust path as TokenStream");
     }
 
     if name.contains("::") {
@@ -373,6 +375,11 @@ fn compile_function(func: &Function, target_obj: Option<&String>) -> TokenStream
         quote!()
     };
 
+    let attrs = func.attributes.iter().map(|a| {
+        let attr = a.parse::<TokenStream>().expect("Failed to parse attribute");
+        quote! { #[#attr] }
+    });
+
     let gens = if func.generics.is_empty() {
         quote!()
     } else {
@@ -403,7 +410,65 @@ fn compile_function(func: &Function, target_obj: Option<&String>) -> TokenStream
         None => quote!(),
     };
     let body = compile_stmt(&func.body, true, target_obj);
-    quote! { #main_attr pub #async_kw fn #name #gens (#( #params ),*) #ret_type #body }
+    quote! { #main_attr #( #attrs )* pub #async_kw fn #name #gens (#( #params ),*) #ret_type #body }
+}
+
+fn collect_metadata(
+    decls: &[Decl],
+    prefix: &str,
+    mappings: &mut HashMap<String, String>,
+    dependencies: &mut Vec<(String, String)>,
+    use_tokio: &mut bool,
+) {
+    for decl in decls {
+        match decl {
+            Decl::ExternFunction(f) => {
+                if let Some(p) = &f.rust_path {
+                    let name = if prefix.is_empty() {
+                        f.name.clone()
+                    } else {
+                        format!("{}::{}", prefix, f.name)
+                    };
+                    mappings.insert(name, p.clone());
+                }
+            }
+            Decl::ExternObject(o) => {
+                if let Some(p) = &o.rust_path {
+                    let name = if prefix.is_empty() {
+                        o.name.clone()
+                    } else {
+                        format!("{}::{}", prefix, o.name)
+                    };
+                    mappings.insert(name, p.clone());
+                }
+            }
+            Decl::ExternEnum(e) => {
+                if let Some(p) = &e.rust_path {
+                    let name = if prefix.is_empty() {
+                        e.name.clone()
+                    } else {
+                        format!("{}::{}", prefix, e.name)
+                    };
+                    mappings.insert(name, p.clone());
+                }
+            }
+            Decl::RustDependency(name, version) => {
+                dependencies.push((name.clone(), version.clone()));
+            }
+            Decl::Function(f) if f.name == "main" && f.is_async && prefix.is_empty() => {
+                *use_tokio = true;
+            }
+            Decl::Module(name, inner_decls) => {
+                let new_prefix = if prefix.is_empty() {
+                    name.clone()
+                } else {
+                    format!("{}::{}", prefix, name)
+                };
+                collect_metadata(inner_decls, &new_prefix, mappings, dependencies, use_tokio);
+            }
+            _ => {}
+        }
+    }
 }
 
 pub fn compile(program: Program) {
@@ -414,32 +479,13 @@ pub fn compile(program: Program) {
     // Reset and collect mappings
     if let Ok(mut mappings) = RUST_MAPPINGS.lock() {
         mappings.clear();
-        for decl in &program.declarations {
-            match decl {
-                Decl::ExternFunction(f) => {
-                    if let Some(p) = &f.rust_path {
-                        mappings.insert(f.name.clone(), p.clone());
-                    }
-                }
-                Decl::ExternObject(o) => {
-                    if let Some(p) = &o.rust_path {
-                        mappings.insert(o.name.clone(), p.clone());
-                    }
-                }
-                Decl::ExternEnum(e) => {
-                    if let Some(p) = &e.rust_path {
-                        mappings.insert(e.name.clone(), p.clone());
-                    }
-                }
-                Decl::RustDependency(name, version) => {
-                    dependencies.push((name.clone(), version.clone()));
-                }
-                Decl::Function(f) if f.name == "main" && f.is_async => {
-                    use_tokio = true;
-                }
-                _ => {}
-            }
-        }
+        collect_metadata(
+            &program.declarations,
+            "",
+            &mut mappings,
+            &mut dependencies,
+            &mut use_tokio,
+        );
     }
 
     if use_tokio {
@@ -733,7 +779,11 @@ edition = "2021"
 
     for (name, version) in dependencies {
         if name != "tokio" {
-            cargo_toml.push_str(&format!("{} = \"{}\"\n", name, version));
+            if version.starts_with('{') || version.starts_with('"') {
+                cargo_toml.push_str(&format!("{} = {}\n", name, version));
+            } else {
+                cargo_toml.push_str(&format!("{} = \"{}\"\n", name, version));
+            }
         }
     }
 
@@ -876,8 +926,12 @@ fn compile_decls(decls: &[Decl], tokens: &mut TokenStream) {
                     let fty = compile_type(&f.ty);
                     quote! { pub #fname: #fty }
                 });
+                let attrs = obj.attributes.iter().map(|a| {
+                    let attr = a.parse::<TokenStream>().expect("Failed to parse attribute");
+                    quote! { #[#attr] }
+                });
                 tokens.extend(
-                    quote! { #[derive(Clone, Debug)] pub struct #name #gens { #( #fields ),* } },
+                    quote! { #( #attrs )* #[derive(Clone, Debug)] pub struct #name #gens { #( #fields ),* } },
                 );
             }
             Decl::Enum(enm) => {
@@ -897,7 +951,11 @@ fn compile_decls(decls: &[Decl], tokens: &mut TokenStream) {
                         quote! { #vname(#( #vtypes ),*) }
                     }
                 });
-                tokens.extend(quote! { #[derive(Clone, Debug, PartialEq)] pub enum #name #gens { #( #variants ),* } });
+                let attrs = enm.attributes.iter().map(|a| {
+                    let attr = a.parse::<TokenStream>().expect("Failed to parse attribute");
+                    quote! { #[#attr] }
+                });
+                tokens.extend(quote! { #( #attrs )* #[derive(Clone, Debug, PartialEq)] pub enum #name #gens { #( #variants ),* } });
             }
             Decl::Impl(imp) => {
                 let target = compile_id(&imp.target);

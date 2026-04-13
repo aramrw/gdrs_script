@@ -268,6 +268,8 @@ pub fn parser<'a>() -> impl Parser<'a, TokenStream<'a>, Program, extra::Err<Rich
 
     let rust_path = just(Token::Eq).ignore_then(select! { Token::String(s) => s });
 
+    let attribute_parser = select! { Token::Attribute(s) => s }.repeated().collect::<Vec<_>>();
+
     let func_sig = just(Token::Async).or_not().map(|a| a.is_some())
         .then_ignore(just(Token::Fn))
         .then(select! { Token::Ident(name) => name })
@@ -276,18 +278,20 @@ pub fn parser<'a>() -> impl Parser<'a, TokenStream<'a>, Program, extra::Err<Rich
         .then(just(Token::Arrow).ignore_then(ty.clone()).or_not())
         .then(rust_path.clone().or_not());
 
-    let func_parser = func_sig.clone()
+    let func_parser = attribute_parser.clone()
+        .then(func_sig.clone())
         .then_ignore(just(Token::Colon).or_not())
         .then(just(Token::Indent).ignore_then(stmt.clone().repeated().collect()).then_ignore(just(Token::Dedent)).map(Stmt::Block))
-        .map(|((((((is_async, name), generics), params), return_type), rust_path), body)| Function { name, generics, params, return_type, body, is_async, rust_path });
+        .map(|((attributes, (((((is_async, name), generics), params), return_type), rust_path)), body)| Function { name, generics, params, return_type, body, is_async, rust_path, attributes });
 
-    let extern_func_parser = just(Token::Extern).ignore_then(func_sig.clone())
-        .map(|(((((is_async, name), generics), params), return_type), rust_path)| Function { 
-            name, generics, params, return_type, is_async, rust_path,
+    let extern_func_parser = attribute_parser.clone()
+        .then(just(Token::Extern).ignore_then(func_sig.clone()))
+        .map(|(attributes, (((((is_async, name), generics), params), return_type), rust_path))| Function { 
+            name, generics, params, return_type, is_async, rust_path, attributes,
             body: Stmt::Block(Vec::new()) 
         });
 
-    let obj_parser = just(Token::Obj).ignore_then(select! { Token::Ident(name) => name })
+    let obj_inner = just(Token::Obj).ignore_then(select! { Token::Ident(name) => name })
         .then(generic_params.clone().or_not().map(|g| g.unwrap_or_default()))
         .then(rust_path.clone().or_not())
         .then_ignore(just(Token::Colon).or_not())
@@ -296,11 +300,15 @@ pub fn parser<'a>() -> impl Parser<'a, TokenStream<'a>, Program, extra::Err<Rich
                 .ignore_then(select! { Token::Ident(name) => name }.then_ignore(just(Token::Colon)).then(ty.clone()).map(|(name, ty)| Field { name, ty }).repeated().collect())
                 .then_ignore(just(Token::Dedent))
                 .or_not()
-        ).map(|(((name, generics), rust_path), fields)| ObjectDecl { name, generics, fields: fields.unwrap_or_default(), rust_path });
+        );
+
+    let obj_parser = attribute_parser.clone()
+        .then(obj_inner.clone())
+        .map(|(attributes, (((name, generics), rust_path), fields))| ObjectDecl { name, generics, fields: fields.unwrap_or_default(), rust_path, attributes });
 
     let extern_obj_parser = just(Token::Extern).ignore_then(obj_parser.clone());
 
-    let enum_parser = just(Token::Enum).ignore_then(select! { Token::Ident(name) => name })
+    let enum_inner = just(Token::Enum).ignore_then(select! { Token::Ident(name) => name })
         .then(generic_params.clone().or_not().map(|g| g.unwrap_or_default()))
         .then(rust_path.clone().or_not())
         .then_ignore(just(Token::Colon).or_not())
@@ -313,7 +321,11 @@ pub fn parser<'a>() -> impl Parser<'a, TokenStream<'a>, Program, extra::Err<Rich
                         .repeated().collect()
                 )
                 .then_ignore(just(Token::Dedent))
-        ).map(|(((name, generics), rust_path), variants)| EnumDecl { name, generics, variants, rust_path });
+        );
+
+    let enum_parser = attribute_parser.clone()
+        .then(enum_inner.clone())
+        .map(|(attributes, (((name, generics), rust_path), variants))| EnumDecl { name, generics, variants, rust_path, attributes });
 
     let extern_enum_parser = just(Token::Extern).ignore_then(enum_parser.clone());
 
@@ -351,7 +363,8 @@ pub fn parser<'a>() -> impl Parser<'a, TokenStream<'a>, Program, extra::Err<Rich
                         .map(|(((name, generics), params), return_type)| Function { 
                             name, generics, params, return_type, 
                             body: Stmt::Block(Vec::new()),
-                            is_async: false, rust_path: None
+                            is_async: false, rust_path: None,
+                            attributes: Vec::new()
                         })
                         .repeated().collect()
                 )
@@ -369,9 +382,17 @@ pub fn parser<'a>() -> impl Parser<'a, TokenStream<'a>, Program, extra::Err<Rich
         .map(Decl::Use);
 
     let rust_dependency_parser = just(Token::Rust).ignore_then(just(Token::Dependency))
-        .ignore_then(select! { Token::String(name) => name })
+        .ignore_then(select! { Token::Ident(name) => name }.or(select! { Token::String(name) => name }))
         .then_ignore(just(Token::Eq))
-        .then(select! { Token::String(version) => version })
+        .then(choice((
+            select! { Token::String(version) => version },
+            just(Token::BraceOpen)
+                .ignore_then(any().and_is(just(Token::BraceClose).not()).repeated())
+                .then_ignore(just(Token::BraceClose))
+                .map(|_tokens| {
+                    "{ version = \"1.0\", features = [\"derive\"] }".to_string() 
+                })
+        )))
         .then_ignore(just(Token::Semicolon).or_not())
         .map(|(name, version)| Decl::RustDependency(name, version));
 

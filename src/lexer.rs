@@ -12,6 +12,7 @@ pub enum Token {
     Comma, Semicolon, DoubleColon, FatArrow,
     // Significant Whitespace
     Indent, Dedent,
+    Attribute(String),
 }
 
 pub fn lex(source: &str) -> Vec<Token> {
@@ -56,7 +57,24 @@ pub fn lex(source: &str) -> Vec<Token> {
             match c {
                 ' ' | '\t' | '\r' => continue,
                 '/' if chars.peek() == Some(&'/') => break,
-                '#' => break,
+                '#' => {
+                    if chars.peek() == Some(&'[') {
+                        chars.next();
+                        let mut s = String::new();
+                        let mut depth = 1;
+                        while let Some(nc) = chars.next() {
+                            if nc == '[' { depth += 1; }
+                            if nc == ']' { 
+                                depth -= 1; 
+                                if depth == 0 { break; }
+                            }
+                            s.push(nc);
+                        }
+                        tokens.push(Token::Attribute(s));
+                    } else {
+                        break;
+                    }
+                }
                 '(' => { tokens.push(Token::ParenOpen); nest_level += 1; }
                 ')' => { tokens.push(Token::ParenClose); nest_level -= 1; }
                 '{' => { tokens.push(Token::BraceOpen); nest_level += 1; }

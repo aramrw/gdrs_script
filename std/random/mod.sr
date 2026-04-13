@@ -1,0 +1,15 @@
+rust dependency "rand" = "0.8"
+
+extern fn f32_val() -> f32 = "rand::random::<f32>"
+extern fn f64_val() -> f64 = "rand::random::<f64>"
+extern fn i32_val() -> i32 = "rand::random::<i32>"
+extern fn i64_val() -> i64 = "rand::random::<i64>"
+extern fn bool_val() -> bool = "rand::random::<bool>"
+
+fn range_f32(min: f32, max: f32) -> f32:
+    var r = f32_val()
+    min + (r * (max - min))
+
+fn range_f64(min: f64, max: f64) -> f64:
+    var r = f64_val()
+    min + (r * (max - min))

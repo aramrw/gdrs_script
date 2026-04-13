@@ -78,6 +78,7 @@ pub struct Function {
     pub body: Stmt,
     pub is_async: bool,
     pub rust_path: Option<String>,
+    pub attributes: Vec<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -86,6 +87,7 @@ pub struct ObjectDecl {
     pub generics: Vec<String>,
     pub fields: Vec<Field>,
     pub rust_path: Option<String>,
+    pub attributes: Vec<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -97,6 +99,7 @@ pub struct EnumDecl {
     pub generics: Vec<String>,
     pub variants: Vec<Variant>,
     pub rust_path: Option<String>,
+    pub attributes: Vec<String>,
 }
 
 #[derive(Debug, Clone)]

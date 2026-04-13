@@ -1,12 +1,76 @@
-   0.002618166s  INFO prepare_target{force=false package_id=solar_out v0.1.0 (/Users/aramsamifanni/Programming/lang/solar_out) target="solar_out"}: cargo::core::compiler::fingerprint: stale: changed "/Users/aramsamifanni/Programming/lang/solar_out/src/main.rs"
-   0.002647000s  INFO prepare_target{force=false package_id=solar_out v0.1.0 (/Users/aramsamifanni/Programming/lang/solar_out) target="solar_out"}: cargo::core::compiler::fingerprint:           (vs) "/Users/aramsamifanni/Programming/lang/solar_out/target/debug/.fingerprint/solar_out-791daa6e63b68ca4/dep-bin-solar_out"
-   0.002649541s  INFO prepare_target{force=false package_id=solar_out v0.1.0 (/Users/aramsamifanni/Programming/lang/solar_out) target="solar_out"}: cargo::core::compiler::fingerprint:                FileTime { seconds: 1776071718, nanos: 882739088 } < FileTime { seconds: 1776097243, nanos: 412437392 }
-   0.003776458s  INFO prepare_target{force=false package_id=solar_out v0.1.0 (/Users/aramsamifanni/Programming/lang/solar_out) target="solar_out"}: cargo::core::compiler::fingerprint: fingerprint dirty for solar_out v0.1.0 (/Users/aramsamifanni/Programming/lang/solar_out)/Check { test: false }/TargetInner { name: "solar_out", doc: true, ..: with_path("/Users/aramsamifanni/Programming/lang/solar_out/src/main.rs", Edition2021) }
-   0.003783208s  INFO prepare_target{force=false package_id=solar_out v0.1.0 (/Users/aramsamifanni/Programming/lang/solar_out) target="solar_out"}: cargo::core::compiler::fingerprint:     dirty: FsStatusOutdated(StaleItem(ChangedFile { reference: "/Users/aramsamifanni/Programming/lang/solar_out/target/debug/.fingerprint/solar_out-791daa6e63b68ca4/dep-bin-solar_out", reference_mtime: FileTime { seconds: 1776071718, nanos: 882739088 }, stale: "/Users/aramsamifanni/Programming/lang/solar_out/src/main.rs", stale_mtime: FileTime { seconds: 1776097243, nanos: 412437392 } }))
-   0.004745958s  INFO prepare_target{force=false package_id=solar_out v0.1.0 (/Users/aramsamifanni/Programming/lang/solar_out) target="solar_out"}: cargo::core::compiler::fingerprint: stale: changed "/Users/aramsamifanni/Programming/lang/solar_out/src/main.rs"
-   0.004749875s  INFO prepare_target{force=false package_id=solar_out v0.1.0 (/Users/aramsamifanni/Programming/lang/solar_out) target="solar_out"}: cargo::core::compiler::fingerprint:           (vs) "/Users/aramsamifanni/Programming/lang/solar_out/target/debug/.fingerprint/solar_out-20d61b169dd1a5c7/dep-test-bin-solar_out"
-   0.004751666s  INFO prepare_target{force=false package_id=solar_out v0.1.0 (/Users/aramsamifanni/Programming/lang/solar_out) target="solar_out"}: cargo::core::compiler::fingerprint:                FileTime { seconds: 1776071718, nanos: 882737963 } < FileTime { seconds: 1776097243, nanos: 412437392 }
-   0.004903125s  INFO prepare_target{force=false package_id=solar_out v0.1.0 (/Users/aramsamifanni/Programming/lang/solar_out) target="solar_out"}: cargo::core::compiler::fingerprint: fingerprint dirty for solar_out v0.1.0 (/Users/aramsamifanni/Programming/lang/solar_out)/Check { test: true }/TargetInner { name: "solar_out", doc: true, ..: with_path("/Users/aramsamifanni/Programming/lang/solar_out/src/main.rs", Edition2021) }
-   0.004908458s  INFO prepare_target{force=false package_id=solar_out v0.1.0 (/Users/aramsamifanni/Programming/lang/solar_out) target="solar_out"}: cargo::core::compiler::fingerprint:     dirty: FsStatusOutdated(StaleItem(ChangedFile { reference: "/Users/aramsamifanni/Programming/lang/solar_out/target/debug/.fingerprint/solar_out-20d61b169dd1a5c7/dep-test-bin-solar_out", reference_mtime: FileTime { seconds: 1776071718, nanos: 882737963 }, stale: "/Users/aramsamifanni/Programming/lang/solar_out/src/main.rs", stale_mtime: FileTime { seconds: 1776097243, nanos: 412437392 } }))
+   0.009020209s  INFO prepare_target{force=false package_id=solar_out v0.1.0 (/Users/aramsamifanni/Programming/lang/solar_out) target="solar_out"}: cargo::core::compiler::fingerprint: fingerprint error for solar_out v0.1.0 (/Users/aramsamifanni/Programming/lang/solar_out)/Check { test: false }/TargetInner { name: "solar_out", doc: true, ..: with_path("/Users/aramsamifanni/Programming/lang/solar_out/src/main.rs", Edition2021) }
+   0.009035542s  INFO prepare_target{force=false package_id=solar_out v0.1.0 (/Users/aramsamifanni/Programming/lang/solar_out) target="solar_out"}: cargo::core::compiler::fingerprint:     err: failed to read `/Users/aramsamifanni/Programming/lang/solar_out/target/debug/.fingerprint/solar_out-a123a18a9d298bf3/bin-solar_out`
+
+Caused by:
+    No such file or directory (os error 2)
+
+Stack backtrace:
+   0: <std::backtrace::Backtrace>::create
+   1: cargo_util::paths::read_bytes
+   2: cargo_util::paths::read
+   3: cargo::core::compiler::fingerprint::_compare_old_fingerprint
+   4: cargo::core::compiler::fingerprint::prepare_target
+   5: cargo::core::compiler::compile
+   6: <cargo::core::compiler::build_runner::BuildRunner>::compile
+   7: cargo::ops::cargo_compile::compile_ws
+   8: cargo::ops::cargo_compile::compile_with_exec
+   9: cargo::ops::cargo_compile::compile
+  10: cargo::commands::check::exec
+  11: <cargo::cli::Exec>::exec
+  12: cargo::main
+  13: std::sys::backtrace::__rust_begin_short_backtrace::<fn(), ()>
+  14: std::rt::lang_start::<()>::{closure#0}
+  15: std::rt::lang_start_internal
+  16: _main
+   0.011280250s  INFO prepare_target{force=false package_id=serde v1.0.228 target="serde"}: cargo::core::compiler::fingerprint: fingerprint error for serde v1.0.228/Check { test: false }/TargetInner { ..: lib_target("serde", ["lib"], "/Users/aramsamifanni/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.228/src/lib.rs", Edition2021) }
+   0.011286334s  INFO prepare_target{force=false package_id=serde v1.0.228 target="serde"}: cargo::core::compiler::fingerprint:     err: failed to read `/Users/aramsamifanni/Programming/lang/solar_out/target/debug/.fingerprint/serde-5f1875ae503fc666/lib-serde`
+
+Caused by:
+    No such file or directory (os error 2)
+
+Stack backtrace:
+   0: <std::backtrace::Backtrace>::create
+   1: cargo_util::paths::read_bytes
+   2: cargo_util::paths::read
+   3: cargo::core::compiler::fingerprint::_compare_old_fingerprint
+   4: cargo::core::compiler::fingerprint::prepare_target
+   5: cargo::core::compiler::compile
+   6: cargo::core::compiler::compile
+   7: <cargo::core::compiler::build_runner::BuildRunner>::compile
+   8: cargo::ops::cargo_compile::compile_ws
+   9: cargo::ops::cargo_compile::compile_with_exec
+  10: cargo::ops::cargo_compile::compile
+  11: cargo::commands::check::exec
+  12: <cargo::cli::Exec>::exec
+  13: cargo::main
+  14: std::sys::backtrace::__rust_begin_short_backtrace::<fn(), ()>
+  15: std::rt::lang_start::<()>::{closure#0}
+  16: std::rt::lang_start_internal
+  17: _main
+   0.012309959s  INFO prepare_target{force=false package_id=solar_out v0.1.0 (/Users/aramsamifanni/Programming/lang/solar_out) target="solar_out"}: cargo::core::compiler::fingerprint: fingerprint error for solar_out v0.1.0 (/Users/aramsamifanni/Programming/lang/solar_out)/Check { test: true }/TargetInner { name: "solar_out", doc: true, ..: with_path("/Users/aramsamifanni/Programming/lang/solar_out/src/main.rs", Edition2021) }
+   0.012314042s  INFO prepare_target{force=false package_id=solar_out v0.1.0 (/Users/aramsamifanni/Programming/lang/solar_out) target="solar_out"}: cargo::core::compiler::fingerprint:     err: failed to read `/Users/aramsamifanni/Programming/lang/solar_out/target/debug/.fingerprint/solar_out-ad308f8945ca9dc7/test-bin-solar_out`
+
+Caused by:
+    No such file or directory (os error 2)
+
+Stack backtrace:
+   0: <std::backtrace::Backtrace>::create
+   1: cargo_util::paths::read_bytes
+   2: cargo_util::paths::read
+   3: cargo::core::compiler::fingerprint::_compare_old_fingerprint
+   4: cargo::core::compiler::fingerprint::prepare_target
+   5: cargo::core::compiler::compile
+   6: <cargo::core::compiler::build_runner::BuildRunner>::compile
+   7: cargo::ops::cargo_compile::compile_ws
+   8: cargo::ops::cargo_compile::compile_with_exec
+   9: cargo::ops::cargo_compile::compile
+  10: cargo::commands::check::exec
+  11: <cargo::cli::Exec>::exec
+  12: cargo::main
+  13: std::sys::backtrace::__rust_begin_short_backtrace::<fn(), ()>
+  14: std::rt::lang_start::<()>::{closure#0}
+  15: std::rt::lang_start_internal
+  16: _main
+    Checking serde v1.0.228
     Checking solar_out v0.1.0 (/Users/aramsamifanni/Programming/lang/solar_out)
-    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.17s
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.22s

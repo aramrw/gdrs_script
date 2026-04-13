@@ -1,0 +1,1 @@
+extern fn random_f32() -> f32 = "rand::random::<f32>"
