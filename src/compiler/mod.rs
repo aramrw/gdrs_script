@@ -10,6 +10,7 @@ fn compile_type(ty: &Type) -> TokenStream {
         Type::F32 => quote!(f32),
         Type::Bool => quote!(bool),
         Type::Str => quote!(String),
+        Type::File => quote!(std::fs::File),
         Type::BoxPtr(inner) => {
             let t = compile_type(inner);
             quote!(Box<#t>)

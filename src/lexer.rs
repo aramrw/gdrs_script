@@ -5,7 +5,7 @@ pub enum Token {
     // Keywords
     Fn, Var, Mut, Const, Box, If, Else, Print, Obj, Impl, Enum, Match, While, SelfKw,
     // Types
-    I32, F32, Bool, Str,
+    I32, F32, Bool, Str, File,
     // Literals
     Int(i32), Float(f32), Boolean(bool), String(String), Ident(String),
     // Symbols
@@ -112,6 +112,7 @@ pub fn lex(source: &str) -> Vec<Token> {
                         "f32" => tokens.push(Token::F32),
                         "bool" => tokens.push(Token::Bool),
                         "str" => tokens.push(Token::Str),
+                        "file" => tokens.push(Token::File),
                         "true" => tokens.push(Token::Boolean(true)),
                         "false" => tokens.push(Token::Boolean(false)),
                         _ => tokens.push(Token::Ident(s)),
