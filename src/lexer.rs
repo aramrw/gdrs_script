@@ -3,15 +3,15 @@ use crate::ast::*;
 #[derive(Clone, Debug, PartialEq)]
 pub enum Token {
     // Keywords
-    Fn, Var, Mut, Const, Box, If, Else, Print, Obj, Impl, Enum, Match, While, SelfKw,
+    Fn, Var, Mut, Const, Box, If, Else, Print, Obj, Impl, Enum, Match, While, Return, Extern, SelfKw, Use,
     // Types
-    I32, F32, Bool, Str, File,
+    I32, F32, Bool, Str, StringKw, File,
     // Literals
     Int(i32), Float(f32), Boolean(bool), String(String), Ident(String),
     // Symbols
     Plus, Minus, Star, Div, Eq, Colon, Arrow, Dot, Gt, Lt,
     ParenOpen, ParenClose, BraceOpen, BraceClose, BracketOpen, BracketClose,
-    Comma, Semicolon, DoubleColon,
+    Comma, Semicolon, DoubleColon, FatArrow,
     // Significant Whitespace
     Indent, Dedent,
 }
@@ -27,7 +27,11 @@ pub fn lex(source: &str) -> Vec<Token> {
 
         // Only handle significant indentation if we are NOT inside brackets
         if nest_level == 0 {
-            let indent = line.chars().take_while(|c| *c == ' ' || *c == '\t').count();
+            let mut indent = 0;
+            for c in line.chars().take_while(|c| *c == ' ' || *c == '\t') {
+                if c == '\t' { indent += 4; }
+                else { indent += 1; }
+            }
             let last_indent = *indents.last().unwrap();
 
             if indent > last_indent {
@@ -67,7 +71,10 @@ pub fn lex(source: &str) -> Vec<Token> {
                     if chars.peek() == Some(&':') { chars.next(); tokens.push(Token::DoubleColon); }
                     else { tokens.push(Token::Colon); }
                 }
-                '=' => tokens.push(Token::Eq),
+                '=' => {
+                    if chars.peek() == Some(&'>') { chars.next(); tokens.push(Token::FatArrow); }
+                    else { tokens.push(Token::Eq); }
+                }
                 '"' => {
                     let mut s = String::new();
                     while let Some(&nc) = chars.peek() {
@@ -107,11 +114,15 @@ pub fn lex(source: &str) -> Vec<Token> {
                         "enum" => tokens.push(Token::Enum),
                         "match" => tokens.push(Token::Match),
                         "while" => tokens.push(Token::While),
+                        "return" => tokens.push(Token::Return),
+                        "extern" => tokens.push(Token::Extern),
+                        "use" => tokens.push(Token::Use),
                         "self" => tokens.push(Token::SelfKw),
                         "i32" => tokens.push(Token::I32),
                         "f32" => tokens.push(Token::F32),
                         "bool" => tokens.push(Token::Bool),
                         "str" => tokens.push(Token::Str),
+                        "string" => tokens.push(Token::StringKw),
                         "file" => tokens.push(Token::File),
                         "true" => tokens.push(Token::Boolean(true)),
                         "false" => tokens.push(Token::Boolean(false)),

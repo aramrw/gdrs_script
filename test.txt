@@ -1,0 +1,1 @@
+Hello from a file! This was read using Rust's std::fs::read_to_string directly from SR!

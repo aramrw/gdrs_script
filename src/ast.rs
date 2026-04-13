@@ -1,6 +1,6 @@
 #[derive(Debug, Clone, PartialEq)]
 pub enum Type {
-    I32, F32, Bool, Str, File,
+    I32, F32, Bool, Str, String, File,
     Array(Box<Type>, usize),
     BoxPtr(Box<Type>),
     RawPtr(Box<Type>, bool),
@@ -41,6 +41,7 @@ pub enum Stmt {
     While { condition: Expr, body: Box<Stmt> },
     Block(Vec<Stmt>),
     ExprStmt(Expr),
+    Return(Option<Expr>),
     Match { expr: Expr, arms: Vec<Arm> },
 }
 
@@ -103,6 +104,12 @@ pub enum Decl {
     Object(ObjectDecl),
     Enum(EnumDecl),
     Impl(ImplDecl),
+    ExternFunction(Function),
+    ExternObject(ObjectDecl),
+    ExternEnum(EnumDecl),
+    ExternImpl(ImplDecl),
+    Module(String, Vec<Decl>),
+    Use(Vec<String>),
 }
 
 #[derive(Debug, Clone)]

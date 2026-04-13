@@ -1,0 +1,27 @@
+obj Vector<T>:
+    buffer: *mut T
+    len: i32
+    cap: i32
+
+impl<T> Vector<T>:
+    fn new(capacity: i32) -> *box self:
+        *mut raw_buffer = [0; capacity]
+        *box v = self {
+            buffer: raw_buffer,
+            len: 0,
+            cap: capacity
+        }
+        v
+
+    fn push(mut self, item: T):
+        if self.len < self.cap:
+            self.buffer[self.len] = item
+            self.len = self.len + 1
+        else:
+            print("vector overflow")
+
+    fn get(self, index: i32) -> T:
+        return self.buffer[index]
+
+    fn destroy(self):
+        mem::free(self.buffer, self.cap)

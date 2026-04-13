@@ -11,6 +11,7 @@ fn type_parser<'a>() -> impl Parser<'a, TokenStream<'a>, Type, extra::Err<Rich<'
             just(Token::F32).to(Type::F32),
             just(Token::Bool).to(Type::Bool),
             just(Token::Str).to(Type::Str),
+            just(Token::StringKw).to(Type::String),
             just(Token::File).to(Type::File),
             just(Token::SelfKw).to(Type::SelfType),
             select! { Token::Ident(name) => Type::Custom(name, Vec::new()) },
@@ -35,8 +36,17 @@ fn type_parser<'a>() -> impl Parser<'a, TokenStream<'a>, Type, extra::Err<Rich<'
             .map(|(t, s)| Type::Array(Box::new(t), s));
 
         let custom_with_generics = select! { Token::Ident(name) => name }
-            .then(ty.separated_by(just(Token::Comma)).collect::<Vec<_>>().delimited_by(just(Token::Lt), just(Token::Gt)))
-            .map(|(name, gens)| Type::Custom(name, gens));
+            .then(just(Token::DoubleColon).ignore_then(select! { Token::Ident(name) => name }).repeated().collect::<Vec<_>>())
+            .map(|(first, rest)| {
+                let mut full = first;
+                for part in rest {
+                    full.push_str("::");
+                    full.push_str(&part);
+                }
+                full
+            })
+            .then(ty.separated_by(just(Token::Comma)).collect::<Vec<_>>().delimited_by(just(Token::Lt), just(Token::Gt)).or_not())
+            .map(|(name, gens)| Type::Custom(name, gens.unwrap_or_default()));
 
         choice((custom_with_generics, ptr, array, base))
     })
@@ -97,12 +107,17 @@ fn expr_parser<'a>() -> impl Parser<'a, TokenStream<'a>, Expr, extra::Err<Rich<'
         });
 
         let call = select! { Token::Ident(name) => name }
-            .then(just(Token::DoubleColon).ignore_then(select! { Token::Ident(name) => name }).or_not())
+            .then(just(Token::DoubleColon).ignore_then(select! { Token::Ident(name) => name }).repeated().collect::<Vec<_>>())
+            .map(|(first, rest)| {
+                let mut full = first;
+                for part in rest {
+                    full.push_str("::");
+                    full.push_str(&part);
+                }
+                full
+            })
             .then(expr.clone().separated_by(just(Token::Comma)).collect::<Vec<_>>().delimited_by(just(Token::ParenOpen), just(Token::ParenClose)))
-            .map(|((name, method), args)| {
-                if let Some(m) = method { Expr::Call(format!("{}::{}", name, m), args) }
-                else { Expr::Call(name, args) }
-            });
+            .map(|(name, args)| Expr::Call(name, args));
 
         let atom = choice((call, suffixed));
 
@@ -193,9 +208,48 @@ pub fn parser<'a>() -> impl Parser<'a, TokenStream<'a>, Program, extra::Err<Rich
         let while_stmt = just(Token::While).ignore_then(expr.clone()).then_ignore(just(Token::Colon)).then(block.clone())
             .map(|(condition, body)| Stmt::While { condition, body: Box::new(body) });
 
+        let return_stmt = just(Token::Return).ignore_then(expr.clone().or_not())
+            .then_ignore(just(Token::Semicolon).or_not())
+            .map(Stmt::Return);
+
+        let match_stmt = just(Token::Match).ignore_then(expr.clone())
+            .then_ignore(just(Token::Colon).or_not())
+            .then(
+                just(Token::Indent)
+                    .ignore_then(
+                        select! { Token::Ident(name) => name }
+                            .then(just(Token::DoubleColon).ignore_then(select! { Token::Ident(name) => name }).repeated().collect::<Vec<_>>())
+                            .map(|(first, mut rest)| {
+                                if rest.is_empty() {
+                                    (first, None)
+                                } else {
+                                    let var = rest.pop().unwrap();
+                                    let mut enm = first;
+                                    for part in rest {
+                                        enm.push_str("::");
+                                        enm.push_str(&part);
+                                    }
+                                    (enm, Some(var))
+                                }
+                            })
+                            .then(select! { Token::Ident(name) => name }.separated_by(just(Token::Comma)).collect::<Vec<_>>().delimited_by(just(Token::ParenOpen), just(Token::ParenClose)).or_not())
+                            .map(|((enm, var), params)| {
+                                if let Some(v) = var { Pattern::Variant(enm, v, params.unwrap_or_default()) }
+                                else { Pattern::Variable(enm) }
+                            })
+                            .or(expr.clone().map(Pattern::Literal))
+                            .then_ignore(just(Token::FatArrow))
+                            .then(stmt.clone())
+                            .map(|(pattern, body)| Arm { pattern, body })
+                            .repeated().collect()
+                    )
+                    .then_ignore(just(Token::Dedent))
+            )
+            .map(|(expr, arms)| Stmt::Match { expr, arms });
+
         let expr_stmt = expr.clone().map(Stmt::ExprStmt).then_ignore(just(Token::Semicolon).or_not());
 
-        choice((ptr_decl, var_decl, var_decl_rev, assign, print_stmt, block, if_stmt, while_stmt, expr_stmt))
+        choice((ptr_decl, var_decl, var_decl_rev, assign, print_stmt, block, if_stmt, while_stmt, return_stmt, match_stmt, expr_stmt))
     });
 
     let generic_params = select! { Token::Ident(name) => name }.separated_by(just(Token::Comma)).collect::<Vec<_>>().delimited_by(just(Token::Lt), just(Token::Gt));
@@ -209,13 +263,35 @@ pub fn parser<'a>() -> impl Parser<'a, TokenStream<'a>, Program, extra::Err<Rich
             is_mutable: mut_kw.is_some() 
         });
 
-    let func_parser = just(Token::Fn).ignore_then(select! { Token::Ident(name) => name })
+    let func_sig = select! { Token::Ident(name) => name }
         .then(generic_params.clone().or_not().map(|g| g.unwrap_or_default()))
-        .then(param.separated_by(just(Token::Comma)).collect::<Vec<_>>().delimited_by(just(Token::ParenOpen), just(Token::ParenClose)))
-        .then(just(Token::Arrow).ignore_then(ty.clone()).or_not())
+        .then(param.clone().separated_by(just(Token::Comma)).collect::<Vec<_>>().delimited_by(just(Token::ParenOpen), just(Token::ParenClose)))
+        .then(just(Token::Arrow).ignore_then(ty.clone()).or_not());
+
+    let func_parser = just(Token::Fn).ignore_then(func_sig.clone())
         .then_ignore(just(Token::Colon).or_not())
         .then(just(Token::Indent).ignore_then(stmt.clone().repeated().collect()).then_ignore(just(Token::Dedent)).map(Stmt::Block))
         .map(|((((name, generics), params), return_type), body)| Function { name, generics, params, return_type, body });
+
+    let extern_func_parser = just(Token::Extern).ignore_then(just(Token::Fn)).ignore_then(
+        select! { Token::Ident(name) => name }
+            .then(just(Token::DoubleColon).ignore_then(select! { Token::Ident(name) => name }).repeated().collect::<Vec<_>>())
+            .map(|(first, rest)| {
+                let mut full = first;
+                for part in rest {
+                    full.push_str("::");
+                    full.push_str(&part);
+                }
+                full
+            })
+    )
+        .then(generic_params.clone().or_not().map(|g| g.unwrap_or_default()))
+        .then(param.clone().separated_by(just(Token::Comma)).collect::<Vec<_>>().delimited_by(just(Token::ParenOpen), just(Token::ParenClose)))
+        .then(just(Token::Arrow).ignore_then(ty.clone()).or_not())
+        .map(|(((name, generics), params), return_type)| Function { 
+            name, generics, params, return_type, 
+            body: Stmt::Block(Vec::new()) 
+        });
 
     let obj_parser = just(Token::Obj).ignore_then(select! { Token::Ident(name) => name })
         .then(generic_params.clone().or_not().map(|g| g.unwrap_or_default()))
@@ -226,15 +302,137 @@ pub fn parser<'a>() -> impl Parser<'a, TokenStream<'a>, Program, extra::Err<Rich
                 .then_ignore(just(Token::Dedent))
         ).map(|((name, generics), fields)| ObjectDecl { name, generics, fields });
 
+    let extern_obj_parser = just(Token::Extern).ignore_then(just(Token::Obj)).ignore_then(
+        select! { Token::Ident(name) => name }
+            .then(just(Token::DoubleColon).ignore_then(select! { Token::Ident(name) => name }).repeated().collect::<Vec<_>>())
+            .map(|(first, rest)| {
+                let mut full = first;
+                for part in rest {
+                    full.push_str("::");
+                    full.push_str(&part);
+                }
+                full
+            })
+    )
+        .then(generic_params.clone().or_not().map(|g| g.unwrap_or_default()))
+        .then_ignore(just(Token::Colon).or_not())
+        .then(
+            just(Token::Indent)
+                .ignore_then(select! { Token::Ident(name) => name }.then_ignore(just(Token::Colon)).then(ty.clone()).map(|(name, ty)| Field { name, ty }).repeated().collect())
+                .then_ignore(just(Token::Dedent))
+                .or_not()
+        ).map(|((name, generics), fields)| ObjectDecl { name, generics, fields: fields.unwrap_or_default() });
+
+    let enum_parser = just(Token::Enum).ignore_then(select! { Token::Ident(name) => name })
+        .then(generic_params.clone().or_not().map(|g| g.unwrap_or_default()))
+        .then_ignore(just(Token::Colon).or_not())
+        .then(
+            just(Token::Indent)
+                .ignore_then(
+                    select! { Token::Ident(name) => name }
+                        .then(ty.clone().separated_by(just(Token::Comma)).collect::<Vec<_>>().delimited_by(just(Token::ParenOpen), just(Token::ParenClose)).or_not())
+                        .map(|(name, types)| Variant { name, types: types.unwrap_or_default() })
+                        .repeated().collect()
+                )
+                .then_ignore(just(Token::Dedent))
+        ).map(|((name, generics), variants)| EnumDecl { name, generics, variants });
+
+    let extern_enum_parser = just(Token::Extern).ignore_then(just(Token::Enum)).ignore_then(
+        select! { Token::Ident(name) => name }
+            .then(just(Token::DoubleColon).ignore_then(select! { Token::Ident(name) => name }).repeated().collect::<Vec<_>>())
+            .map(|(first, rest)| {
+                let mut full = first;
+                for part in rest {
+                    full.push_str("::");
+                    full.push_str(&part);
+                }
+                full
+            })
+    )
+        .then(generic_params.clone().or_not().map(|g| g.unwrap_or_default()))
+        .then_ignore(just(Token::Colon).or_not())
+        .then(
+            just(Token::Indent)
+                .ignore_then(
+                    select! { Token::Ident(name) => name }
+                        .then(ty.clone().separated_by(just(Token::Comma)).collect::<Vec<_>>().delimited_by(just(Token::ParenOpen), just(Token::ParenClose)).or_not())
+                        .map(|(name, types)| Variant { name, types: types.unwrap_or_default() })
+                        .repeated().collect()
+                )
+                .then_ignore(just(Token::Dedent))
+                .or_not()
+        ).map(|((name, generics), variants)| EnumDecl { name, generics, variants: variants.unwrap_or_default() });
+
     let impl_parser = just(Token::Impl)
         .ignore_then(generic_params.clone().or_not().map(|g| g.unwrap_or_default()))
-        .then(select! { Token::Ident(name) => name })
+        .then(
+            select! { Token::Ident(name) => name }
+                .then(just(Token::DoubleColon).ignore_then(select! { Token::Ident(name) => name }).repeated().collect::<Vec<_>>())
+                .map(|(first, rest)| {
+                    let mut full = first;
+                    for part in rest {
+                        full.push_str("::");
+                        full.push_str(&part);
+                    }
+                    full
+                })
+        )
         .then(generic_params.clone().or_not().map(|g| g.unwrap_or_default()))
         .then_ignore(just(Token::Colon).or_not())
         .then(just(Token::Indent).ignore_then(func_parser.clone().repeated().collect()).then_ignore(just(Token::Dedent)))
         .map(|(((_impl_gens, target), _target_gens), functions)| ImplDecl { target, generics: _impl_gens, functions });
 
-    let decl = choice((func_parser.map(Decl::Function), obj_parser.map(Decl::Object), impl_parser.map(Decl::Impl)));
+    let extern_impl_parser = just(Token::Extern).ignore_then(just(Token::Impl))
+        .ignore_then(generic_params.clone().or_not().map(|g| g.unwrap_or_default()))
+        .then(
+            select! { Token::Ident(name) => name }
+                .then(just(Token::DoubleColon).ignore_then(select! { Token::Ident(name) => name }).repeated().collect::<Vec<_>>())
+                .map(|(first, rest)| {
+                    let mut full = first;
+                    for part in rest {
+                        full.push_str("::");
+                        full.push_str(&part);
+                    }
+                    full
+                })
+        )
+        .then(generic_params.clone().or_not().map(|g| g.unwrap_or_default()))
+        .then_ignore(just(Token::Colon).or_not())
+        .then(
+            just(Token::Indent)
+                .ignore_then(
+                    just(Token::Fn).ignore_then(func_sig.clone())
+                        .map(|(((name, generics), params), return_type)| Function { 
+                            name, generics, params, return_type, 
+                            body: Stmt::Block(Vec::new()) 
+                        })
+                        .repeated().collect()
+                )
+                .then_ignore(just(Token::Dedent))
+        )
+        .map(|(((_impl_gens, target), _target_gens), functions)| ImplDecl { target, generics: _impl_gens, functions });
+
+    let use_parser = just(Token::Use).ignore_then(
+        select! { Token::Ident(name) => name }
+            .separated_by(just(Token::DoubleColon))
+            .at_least(1)
+            .collect::<Vec<_>>()
+    )
+        .then_ignore(just(Token::Semicolon).or_not())
+        .map(Decl::Use);
+
+    let decl = choice((
+        func_parser.map(Decl::Function), 
+        obj_parser.map(Decl::Object), 
+        enum_parser.map(Decl::Enum), 
+        impl_parser.map(Decl::Impl), 
+        extern_func_parser.map(Decl::ExternFunction), 
+        extern_obj_parser.map(Decl::ExternObject), 
+        extern_enum_parser.map(Decl::ExternEnum),
+        extern_impl_parser.map(Decl::ExternImpl),
+        use_parser
+    ));
+
 
     decl.repeated().collect().map(|declarations| Program { declarations }).then_ignore(end())
 }

@@ -22,11 +22,17 @@ impl SemanticAnalyzer {
 
     fn types_equal(&self, a: &Type, b: &Type) -> bool {
         match (a, b) {
+            (Type::Str, Type::Str) => true,
+            (Type::String, Type::String) => true,
+            (Type::File, Type::Custom(n, _)) if n == "std::fs::File" => true,
+            (Type::Custom(n, _), Type::File) if n == "std::fs::File" => true,
             (Type::Array(t1, _), Type::Array(t2, _)) => self.types_equal(t1, t2),
             (Type::BoxPtr(t1), Type::BoxPtr(t2)) => self.types_equal(t1, t2),
             (Type::RawPtr(t1, m1), Type::RawPtr(t2, m2)) => m1 == m2 && self.types_equal(t1, t2),
             (Type::Custom(n1, g1), Type::Custom(n2, g2)) => {
-                if n1 != n2 || g1.len() != g2.len() { return false; }
+                if n1 != n2 { return false; }
+                if g1.is_empty() || g2.is_empty() { return true; }
+                if g1.len() != g2.len() { return false; }
                 g1.iter().zip(g2).all(|(a, b)| self.types_equal(a, b))
             }
             _ => a == b,
@@ -47,45 +53,22 @@ impl SemanticAnalyzer {
     }
 
     pub fn analyze(&mut self, program: &Program) -> Result<(), String> {
-        self.functions.insert("file_create".to_string(), (vec![Type::Str], Some(Type::File)));
-        self.functions.insert("file_open".to_string(), (vec![Type::Str], Some(Type::File)));
-        self.functions.insert("file_read".to_string(), (vec![Type::File], Some(Type::Str)));
-        self.functions.insert("file_write".to_string(), (vec![Type::File, Type::Str], None));
+        self.functions.insert("fs::create".to_string(), (vec![Type::Str], Some(Type::File)));
+        self.functions.insert("fs::open".to_string(), (vec![Type::Str], Some(Type::File)));
+        self.functions.insert("fs::read".to_string(), (vec![Type::File], Some(Type::String)));
+        self.functions.insert("fs::write".to_string(), (vec![Type::File, Type::Str], None));
+        self.functions.insert("fs::write_string".to_string(), (vec![Type::File, Type::String], None));
 
-        for decl in &program.declarations {
-            if let Decl::Object(obj) = decl {
-                let mut fields = HashMap::new();
-                for f in &obj.fields { fields.insert(f.name.clone(), self.resolve_type(&f.ty)); }
-                self.objects.insert(obj.name.clone(), fields);
-            }
-        }
+        // Built-in string methods
+        self.functions.insert("str::to_owned_string".to_string(), (vec![Type::Str], Some(Type::String)));
+        self.functions.insert("string::append".to_string(), (vec![Type::String, Type::Str], None));
+        self.functions.insert("string::len".to_string(), (vec![Type::String], Some(Type::I32)));
+        self.functions.insert("str::len".to_string(), (vec![Type::Str], Some(Type::I32)));
 
-        for decl in &program.declarations {
-            if let Decl::Enum(enm) = decl {
-                let mut variants = HashMap::new();
-                for v in &enm.variants { variants.insert(v.name.clone(), v.types.iter().map(|t| self.resolve_type(t)).collect()); }
-                self.enums.insert(enm.name.clone(), variants);
-            }
-        }
+        // Memory management
+        self.functions.insert("mem::free".to_string(), (vec![Type::RawPtr(Box::new(Type::Generic("T".into())), true), Type::I32], None));
 
-        for decl in &program.declarations {
-            match decl {
-                Decl::Function(func) => {
-                    let ret = func.return_type.as_ref().map(|t| self.resolve_type(t));
-                    self.functions.insert(func.name.clone(), (func.params.iter().map(|p| self.resolve_type(&p.ty)).collect(), ret));
-                }
-                Decl::Impl(imp) => {
-                    self.current_obj = Some(imp.target.clone());
-                    for func in &imp.functions {
-                        let name = format!("{}::{}", imp.target, func.name);
-                        let ret = func.return_type.as_ref().map(|t| self.resolve_type(t));
-                        self.functions.insert(name, (func.params.iter().map(|p| self.resolve_type(&p.ty)).collect(), ret));
-                    }
-                    self.current_obj = None;
-                }
-                _ => {}
-            }
-        }
+        self.collect_decls(&program.declarations, "")?;
 
         for (enum_name, variants) in &self.enums {
             for (variant_name, param_types) in variants {
@@ -94,11 +77,71 @@ impl SemanticAnalyzer {
             }
         }
 
-        for decl in &program.declarations {
+        self.analyze_decls(&program.declarations, "")?;
+        Ok(())
+    }
+
+    fn collect_decls(&mut self, decls: &[Decl], prefix: &str) -> Result<(), String> {
+        for decl in decls {
             match decl {
-                Decl::Function(func) => self.analyze_function(func, None)?,
+                Decl::Object(obj) | Decl::ExternObject(obj) => {
+                    let full_name = if prefix.is_empty() { obj.name.clone() } else { format!("{}::{}", prefix, obj.name) };
+                    let mut fields = HashMap::new();
+                    for f in &obj.fields { fields.insert(f.name.clone(), self.resolve_type(&f.ty)); }
+                    self.objects.insert(full_name, fields);
+                }
+                Decl::Enum(enm) | Decl::ExternEnum(enm) => {
+                    let full_name = if prefix.is_empty() { enm.name.clone() } else { format!("{}::{}", prefix, enm.name) };
+                    let mut variants = HashMap::new();
+                    for v in &enm.variants { variants.insert(v.name.clone(), v.types.iter().map(|t| self.resolve_type(t)).collect()); }
+                    self.enums.insert(full_name, variants);
+                }
+                Decl::Function(func) | Decl::ExternFunction(func) => {
+                    let full_name = if prefix.is_empty() { func.name.clone() } else { format!("{}::{}", prefix, func.name) };
+                    let ret = func.return_type.as_ref().map(|t| self.resolve_type(t));
+                    self.functions.insert(full_name, (func.params.iter().map(|p| self.resolve_type(&p.ty)).collect(), ret));
+                }
+                Decl::Impl(imp) | Decl::ExternImpl(imp) => {
+                    let full_target = if prefix.is_empty() { imp.target.clone() } else { 
+                        // If target is already namespaced (like std::fs::File), don't re-prefix it?
+                        // Actually, if it's IN a module, it might be relative.
+                        // For now, let's assume if it contains :: it's absolute-ish.
+                        if imp.target.contains("::") { imp.target.clone() } else { format!("{}::{}", prefix, imp.target) }
+                    };
+                    self.current_obj = Some(full_target.clone());
+                    for func in &imp.functions {
+                        let name = format!("{}::{}", full_target, func.name);
+                        let ret = func.return_type.as_ref().map(|t| self.resolve_type(t));
+                        self.functions.insert(name, (func.params.iter().map(|p| self.resolve_type(&p.ty)).collect(), ret));
+                    }
+                    self.current_obj = None;
+                }
+                Decl::Module(name, inner) => {
+                    let new_prefix = if prefix.is_empty() { name.clone() } else { format!("{}::{}", prefix, name) };
+                    self.collect_decls(inner, &new_prefix)?;
+                }
+                _ => {}
+            }
+        }
+        Ok(())
+    }
+
+    fn analyze_decls(&mut self, decls: &[Decl], prefix: &str) -> Result<(), String> {
+        for decl in decls {
+            match decl {
+                Decl::Function(func) => {
+                    let full_name = if prefix.is_empty() { func.name.clone() } else { format!("{}::{}", prefix, func.name) };
+                    self.analyze_function(func, None)?;
+                }
                 Decl::Impl(imp) => {
-                    for func in &imp.functions { self.analyze_function(func, Some(&imp.target))?; }
+                    let full_target = if prefix.is_empty() { imp.target.clone() } else { 
+                        if imp.target.contains("::") { imp.target.clone() } else { format!("{}::{}", prefix, imp.target) }
+                    };
+                    for func in &imp.functions { self.analyze_function(func, Some(&full_target))?; }
+                }
+                Decl::Module(name, inner) => {
+                    let new_prefix = if prefix.is_empty() { name.clone() } else { format!("{}::{}", prefix, name) };
+                    self.analyze_decls(inner, &new_prefix)?;
                 }
                 _ => {}
             }
@@ -152,6 +195,10 @@ impl SemanticAnalyzer {
             }
             Stmt::Block(stmts) => { for s in stmts { self.analyze_stmt(s)?; } Ok(()) }
             Stmt::ExprStmt(expr) => { self.analyze_expr(expr)?; Ok(()) }
+            Stmt::Return(expr) => {
+                if let Some(e) = expr { self.analyze_expr(e)?; }
+                Ok(())
+            }
             Stmt::Match { expr, arms } => {
                 let expr_ty = self.analyze_expr(expr)?;
                 for arm in arms {
@@ -211,6 +258,8 @@ impl SemanticAnalyzer {
             Expr::MethodCall(lhs, name, _args) => {
                 let lhs_ty = self.analyze_expr(lhs)?;
                 let obj_name = match lhs_ty {
+                    Type::Str => "str".to_string(),
+                    Type::String => "string".to_string(),
                     Type::Custom(n, _) => n,
                     Type::BoxPtr(inner) | Type::RawPtr(inner, _) => match *inner {
                         Type::Custom(n, _) => n,

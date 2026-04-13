@@ -1,0 +1,8 @@
+
+[package]
+name = "solar_out"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+# Dependencies will be added here
