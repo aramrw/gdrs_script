@@ -1,15 +1,13 @@
-use crate::ast::*;
-
 #[derive(Clone, Debug, PartialEq)]
 pub enum Token {
     // Keywords
-    Fn, Var, Mut, Const, Box, If, Else, Print, Obj, Impl, Enum, Match, While, Return, Extern, SelfKw, Use,
+    Fn, Var, Mut, Const, Box, If, Else, Print, Obj, Impl, Enum, Match, While, Return, Extern, SelfKw, Use, ResultKw, ErrorKw, Rust, Async, Await, Dependency,
     // Types
     I32, F32, Bool, Str, StringKw, File,
     // Literals
     Int(i32), Float(f32), Boolean(bool), String(String), Ident(String),
     // Symbols
-    Plus, Minus, Star, Div, Eq, Colon, Arrow, Dot, Gt, Lt,
+    Plus, Minus, Star, Div, Eq, DoubleEq, Colon, Arrow, Dot, Gt, Lt, QuestionMark,
     ParenOpen, ParenClose, BraceOpen, BraceClose, BracketOpen, BracketClose,
     Comma, Semicolon, DoubleColon, FatArrow,
     // Significant Whitespace
@@ -49,6 +47,8 @@ pub fn lex(source: &str) -> Vec<Token> {
         while let Some(c) = chars.next() {
             match c {
                 ' ' | '\t' | '\r' => continue,
+                '/' if chars.peek() == Some(&'/') => break,
+                '#' => break,
                 '(' => { tokens.push(Token::ParenOpen); nest_level += 1; }
                 ')' => { tokens.push(Token::ParenClose); nest_level -= 1; }
                 '{' => { tokens.push(Token::BraceOpen); nest_level += 1; }
@@ -63,6 +63,7 @@ pub fn lex(source: &str) -> Vec<Token> {
                 '>' => tokens.push(Token::Gt),
                 '<' => tokens.push(Token::Lt),
                 '.' => tokens.push(Token::Dot),
+                '?' => tokens.push(Token::QuestionMark),
                 '-' => {
                     if chars.peek() == Some(&'>') { chars.next(); tokens.push(Token::Arrow); }
                     else { tokens.push(Token::Minus); }
@@ -73,15 +74,28 @@ pub fn lex(source: &str) -> Vec<Token> {
                 }
                 '=' => {
                     if chars.peek() == Some(&'>') { chars.next(); tokens.push(Token::FatArrow); }
+                    else if chars.peek() == Some(&'=') { chars.next(); tokens.push(Token::DoubleEq); }
                     else { tokens.push(Token::Eq); }
                 }
                 '"' => {
-                    let mut s = String::new();
-                    while let Some(&nc) = chars.peek() {
-                        if nc == '"' { chars.next(); break; }
-                        s.push(chars.next().unwrap());
+                    let mut s = String :: new () ;
+                    while let Some (nc) = chars . next () {
+                        if nc == '"' { break ; }
+                        if nc == '\\' {
+                            match chars . next () {
+                                Some ('n') => s . push ('\n') ,
+                                Some ('r') => s . push ('\r') ,
+                                Some ('t') => s . push ('\t') ,
+                                Some ('\\') => s . push ('\\') ,
+                                Some ('"') => s . push ('"') ,
+                                Some (other) => { s . push ('\\') ; s . push (other) ; }
+                                None => s . push ('\\') ,
+                            }
+                        } else {
+                            s . push (nc) ;
+                        }
                     }
-                    tokens.push(Token::String(s));
+                    tokens . push (Token :: String (s)) ;
                 }
                 _ if c.is_ascii_digit() => {
                     let mut s = c.to_string();
@@ -117,7 +131,13 @@ pub fn lex(source: &str) -> Vec<Token> {
                         "return" => tokens.push(Token::Return),
                         "extern" => tokens.push(Token::Extern),
                         "use" => tokens.push(Token::Use),
+                        "rust" => tokens.push(Token::Rust),
+                        "async" => tokens.push(Token::Async),
+                        "await" => tokens.push(Token::Await),
+                        "dependency" => tokens.push(Token::Dependency),
                         "self" => tokens.push(Token::SelfKw),
+                        "result" => tokens.push(Token::ResultKw),
+                        "error" => tokens.push(Token::ErrorKw),
                         "i32" => tokens.push(Token::I32),
                         "f32" => tokens.push(Token::F32),
                         "bool" => tokens.push(Token::Bool),

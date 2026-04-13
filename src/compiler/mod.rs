@@ -3,23 +3,42 @@ use proc_macro2::TokenStream;
 use quote::quote;
 use std::fs;
 use std::process::Command;
+use std::collections::HashMap;
+use std::sync::Mutex;
+
+lazy_static::lazy_static! {
+    static ref RUST_MAPPINGS: Mutex<HashMap<String, String>> = Mutex::new(HashMap::new());
+}
 
 fn compile_id(name: &str) -> TokenStream {
+    // Check for explicit rust mapping
+    if let Ok(mappings) = RUST_MAPPINGS.lock() {
+        if let Some(rust_path) = mappings.get(name) {
+            let parts: Vec<TokenStream> = rust_path.split("::").map(|p| {
+                let id = quote::format_ident!("{}", p);
+                quote!(#id)
+            }).collect();
+            return quote!(#( #parts )::*);
+        }
+    }
+
     if name.contains("::") {
         let mut parts: Vec<&str> = name.split("::").collect();
         
         // Strip 'std' from our known internal std modules.
         if parts.get(0) == Some(&"std") && parts.len() > 1 {
             let second = parts[1];
-            if second == "util" || second == "vec" {
+            if second == "util" || second == "vec" || second == "fs" {
                 parts.remove(0);
             }
         }
 
         // If it's a root-level module we defined (mem, fs, math, util, vec), 
         // prepend crate:: so it's accessible from anywhere.
-        let first = parts[0];
-        let root_modules = ["mem", "fs", "math", "util", "vec"];
+        let mut first = parts[0];
+        if first == "fs" { first = "sr_fs"; parts[0] = "sr_fs"; }
+
+        let root_modules = ["mem", "sr_fs", "math", "util", "vec"];
         if root_modules.contains(&first) {
             let tokens: Vec<TokenStream> = parts.iter().map(|p| {
                 let id = quote::format_ident!("{}", p);
@@ -35,9 +54,12 @@ fn compile_id(name: &str) -> TokenStream {
         quote!(#( #tokens )::*)
     } else {
         // If it's a known root-level module, also prepend crate::
-        let root_modules = ["mem", "fs", "math", "util", "vec"];
-        if root_modules.contains(&name) {
-            let id = quote::format_ident!("{}", name);
+        let mut name_to_use = name;
+        if name == "fs" { name_to_use = "sr_fs"; }
+
+        let root_modules = ["mem", "sr_fs", "math", "util", "vec"];
+        if root_modules.contains(&name_to_use) {
+            let id = quote::format_ident!("{}", name_to_use);
             return quote!(crate::#id);
         }
         let id = quote::format_ident!("{}", name);
@@ -78,6 +100,12 @@ fn compile_type(ty: &Type) -> TokenStream {
             }
         }
         Type::SelfType => quote!(Self),
+        Type::Result(ok, err) => {
+            let o = compile_type(ok);
+            let e = compile_type(err);
+            quote!(Result<#o, #e>)
+        }
+        Type::Error => quote!(()),
     }
 }
 
@@ -95,6 +123,15 @@ fn compile_pattern(pat: &Pattern) -> TokenStream {
     }
 }
 
+fn rename_method(name: &str) -> String {
+    let solar_methods = ["append", "len", "contains", "to_string", "lines", "split", "get"];
+    if solar_methods.contains(&name) {
+        format!("solar_{}", name)
+    } else {
+        name.to_string()
+    }
+}
+
 fn compile_expr(expr: &Expr, target_obj: Option<&String>) -> TokenStream {
     match expr {
         Expr::Int(v) => quote! { #v },
@@ -106,15 +143,25 @@ fn compile_expr(expr: &Expr, target_obj: Option<&String>) -> TokenStream {
             quote! { #id }
         }
         Expr::Binary(lhs, op, rhs) => {
-            let lhs = compile_expr(lhs, target_obj);
-            let rhs = compile_expr(rhs, target_obj);
+            let l = compile_expr(lhs, target_obj);
+            let r = compile_expr(rhs, target_obj);
             match op {
-                BinaryOp::Add => quote! { (#lhs + #rhs) },
-                BinaryOp::Subtract => quote! { (#lhs - #rhs) },
-                BinaryOp::Multiply => quote! { (#lhs * #rhs) },
-                BinaryOp::Divide => quote! { (#lhs / #rhs) },
-                BinaryOp::GreaterThan => quote! { (#lhs > #rhs) },
-                BinaryOp::LessThan => quote! { (#lhs < #rhs) },
+                BinaryOp::Add => {
+                    let l_str = format!("{:?}", l);
+                    let r_str = format!("{:?}", r);
+                    if l_str.contains("\"") || l_str.contains("to_string") || l_str.contains("to_owned_string") || l_str.contains("as_str") ||
+                       r_str.contains("\"") || r_str.contains("to_string") || r_str.contains("to_owned_string") || r_str.contains("as_str") {
+                        quote! { format!("{}{}", #l, #r) }
+                    } else {
+                        quote! { (#l + #r) }
+                    }
+                }
+                BinaryOp::Subtract => quote! { (#l - #r) },
+                BinaryOp::Multiply => quote! { (#l * #r) },
+                BinaryOp::Divide => quote! { (#l / #r) },
+                BinaryOp::GreaterThan => quote! { (#l > #r) },
+                BinaryOp::LessThan => quote! { (#l < #r) },
+                BinaryOp::Equal => quote! { (#l == #r) },
             }
         }
         Expr::Call(name, args) => {
@@ -133,7 +180,9 @@ fn compile_expr(expr: &Expr, target_obj: Option<&String>) -> TokenStream {
         }
         Expr::MethodCall(lhs, name, args) => {
             let l = compile_expr(lhs, target_obj);
-            let id = quote::format_ident!("{}", name);
+            let name_to_use = rename_method(name);
+
+            let id = quote::format_ident!("{}", name_to_use);
             let args = args.iter().map(|a| compile_expr(a, target_obj));
             quote! { #l.#id(#( #args ),*) }
         }
@@ -158,7 +207,7 @@ fn compile_expr(expr: &Expr, target_obj: Option<&String>) -> TokenStream {
         Expr::IndexAccess(lhs, index) => {
             let l = compile_expr(lhs, target_obj);
             let i = compile_expr(index, target_obj);
-            quote! { (unsafe { *#l.add(#i as usize) }) }
+            quote! { (unsafe { &*#l.add(#i as usize) }) }
         }
         Expr::Alloc(inner, kind) => {
             let e = compile_expr(inner, target_obj);
@@ -167,6 +216,14 @@ fn compile_expr(expr: &Expr, target_obj: Option<&String>) -> TokenStream {
                 AllocKind::RawMut => quote! { #e },
                 AllocKind::RawConst => quote! { #e },
             }
+        }
+        Expr::Unwrap(inner) => {
+            let e = compile_expr(inner, target_obj);
+            quote! { #e.unwrap() }
+        }
+        Expr::Await(inner) => {
+            let e = compile_expr(inner, target_obj);
+            quote! { #e.await }
         }
     }
 }
@@ -196,7 +253,7 @@ fn compile_stmt(stmt: &Stmt, is_last: bool, target_obj: Option<&String>) -> Toke
         }
         Stmt::Print(expr) => {
             let e = compile_expr(expr, target_obj);
-            quote! { println!("{:?}", #e); }
+            quote! { println!("{:?}", &#e); }
         }
         Stmt::If { condition, then_branch, else_branch } => {
             let cond = compile_expr(condition, target_obj);
@@ -241,10 +298,14 @@ fn compile_stmt(stmt: &Stmt, is_last: bool, target_obj: Option<&String>) -> Toke
 }
 
 fn compile_function(func: &Function, target_obj: Option<&String>) -> TokenStream {
-    let name = quote::format_ident!("{}", func.name);
+    let name_to_use = rename_method(&func.name);
+    let name = quote::format_ident!("{}", name_to_use);
+    let async_kw = if func.is_async { quote!(async) } else { quote!() };
+    let main_attr = if func.name == "main" && func.is_async { quote!(#[tokio::main]) } else { quote!() };
+
     let gens = if func.generics.is_empty() { quote!() } else {
         let gids = func.generics.iter().map(|g| quote::format_ident!("{}", g));
-        quote!(<#( #gids: Clone + Copy ),*>)
+        quote!(<#( #gids: Clone ),*>)
     };
     let params = func.params.iter().map(|p| {
         let p_name = quote::format_ident!("{}", p.name);
@@ -261,35 +322,90 @@ fn compile_function(func: &Function, target_obj: Option<&String>) -> TokenStream
         None => quote!(),
     };
     let body = compile_stmt(&func.body, true, target_obj);
-    quote! { pub fn #name #gens (#( #params ),*) #ret_type #body }
-}
-
-fn compile_extern_function(_func: &Function) -> TokenStream {
-    quote!()
+    quote! { #main_attr pub #async_kw fn #name #gens (#( #params ),*) #ret_type #body }
 }
 
 pub fn compile(program: Program) {
     let mut tokens = TokenStream::new();
+    let mut dependencies = Vec::new();
+    let mut use_tokio = false;
+
+    // Reset and collect mappings
+    if let Ok(mut mappings) = RUST_MAPPINGS.lock() {
+        mappings.clear();
+        for decl in &program.declarations {
+            match decl {
+                Decl::ExternFunction(f) => { if let Some(p) = &f.rust_path { mappings.insert(f.name.clone(), p.clone()); } }
+                Decl::ExternObject(o) => { if let Some(p) = &o.rust_path { mappings.insert(o.name.clone(), p.clone()); } }
+                Decl::ExternEnum(e) => { if let Some(p) = &e.rust_path { mappings.insert(e.name.clone(), p.clone()); } }
+                Decl::RustDependency(name, version) => { dependencies.push((name.clone(), version.clone())); }
+                Decl::Function(f) if f.name == "main" && f.is_async => { use_tokio = true; }
+                _ => {}
+            }
+        }
+    }
+
+    if use_tokio {
+        dependencies.push(("tokio".to_string(), "1.0".to_string()));
+    }
+
     tokens.extend(quote! {
         #![allow(unused)]
         use std::io::{Read, Write};
 
         pub trait SolarStr {
             fn to_owned_string(&self) -> String;
-            fn len(&self) -> i32;
+            fn solar_to_string(&self) -> String;
+            fn solar_len(&self) -> i32;
+            fn solar_contains(&self, s: &str) -> bool;
+            fn solar_split(&self, s: &str) -> Vec<String>;
         }
         impl SolarStr for str {
             fn to_owned_string(&self) -> String { self.to_owned() }
-            fn len(&self) -> i32 { self.len() as i32 }
+            fn solar_to_string(&self) -> String { self.to_owned() }
+            fn solar_len(&self) -> i32 { self.len() as i32 }
+            fn solar_contains(&self, s: &str) -> bool { self.contains(s) }
+            fn solar_split(&self, s: &str) -> Vec<String> { self.split(s).map(|x| x.to_owned()).collect() }
         }
 
         pub trait SolarString {
-            fn append(&mut self, s: &str);
-            fn len(&self) -> i32;
+            fn solar_append(&mut self, s: &str);
+            fn solar_len(&self) -> i32;
+            fn solar_contains(&self, s: &str) -> bool;
+            fn as_str(&self) -> &str;
+            fn solar_lines(&self) -> Vec<String>;
+            fn solar_split(&self, s: &str) -> Vec<String>;
         }
         impl SolarString for String {
-            fn append(&mut self, s: &str) { self.push_str(s); }
-            fn len(&self) -> i32 { self.len() as i32 }
+            fn solar_append(&mut self, s: &str) { self.push_str(s); }
+            fn solar_len(&self) -> i32 { self.len() as i32 }
+            fn solar_contains(&self, s: &str) -> bool { self.contains(s) }
+            fn as_str(&self) -> &str { self.as_str() }
+            fn solar_lines(&self) -> Vec<String> { self.lines().map(|x| x.to_owned()).collect() }
+            fn solar_split(&self, s: &str) -> Vec<String> { self.split(s).map(|x| x.to_owned()).collect() }
+        }
+
+        pub trait SolarVec<T> {
+            fn solar_len(&self) -> i32;
+            fn solar_get(&self, i: i32) -> T;
+        }
+        impl<T: Clone> SolarVec<T> for Vec<T> {
+            fn solar_len(&self) -> i32 { self.len() as i32 }
+            fn solar_get(&self, i: i32) -> T { self[i as usize].clone() }
+        }
+
+        pub trait SolarI32 {
+            fn solar_to_string(&self) -> String;
+        }
+        impl SolarI32 for i32 {
+            fn solar_to_string(&self) -> String { self.to_string() }
+        }
+
+        pub trait SolarF32 {
+            fn solar_to_string(&self) -> String;
+        }
+        impl SolarF32 for f32 {
+            fn solar_to_string(&self) -> String { self.to_string() }
         }
 
         pub mod mem {
@@ -300,8 +416,9 @@ pub fn compile(program: Program) {
             }
         }
 
-        pub mod fs {
+        pub mod sr_fs {
             use std::io::{Read, Write};
+            use std::fs::OpenOptions;
 
             pub fn create(path: &str) -> std::fs::File {
                 std::fs::File::create(path).expect("Failed to create file")
@@ -311,10 +428,18 @@ pub fn compile(program: Program) {
                 std::fs::File::open(path).expect("Failed to open file")
             }
 
+            pub fn append(path: &str) -> std::fs::File {
+                OpenOptions::new().append(true).create(true).open(path).expect("Failed to open file for append")
+            }
+
             pub fn read(mut f: std::fs::File) -> String {
                 let mut s = String::new();
                 f.read_to_string(&mut s).expect("Failed to read file");
                 s
+            }
+
+            pub fn read_to_string(path: &str) -> String {
+                std::fs::read_to_string(path).expect("Failed to read file to string")
             }
 
             pub fn write(mut f: std::fs::File, content: &str) {
@@ -335,15 +460,24 @@ pub fn compile(program: Program) {
     let project_dir = "solar_out";
     fs::create_dir_all(format!("{}/src", project_dir)).ok();
     
-    let cargo_toml = r#"
+    let mut cargo_toml = String::from(r#"
 [package]
 name = "solar_out"
 version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-# Dependencies will be added here
-"#;
+"#);
+
+    if use_tokio {
+        cargo_toml.push_str("tokio = { version = \"1.0\", features = [\"full\"] }\n");
+    }
+
+    for (name, version) in dependencies {
+        if name != "tokio" {
+            cargo_toml.push_str(&format!("{} = \"{}\"\n", name, version));
+        }
+    }
     
     fs::write(format!("{}/Cargo.toml", project_dir), cargo_toml).expect("Failed to write Cargo.toml");
     fs::write(format!("{}/src/main.rs", project_dir), tokens.to_string()).expect("Failed to write src/main.rs");
@@ -356,7 +490,6 @@ edition = "2021"
         .expect("Failed to invoke cargo.");
 
     if status.success() {
-        // Copy the binary back to the root
         let binary_name = if cfg!(windows) { "solar_out.exe" } else { "solar_out" };
         fs::copy(format!("{}/target/debug/{}", project_dir, binary_name), "main_program").ok();
     } else {
@@ -368,10 +501,11 @@ fn compile_decls(decls: &[Decl], tokens: &mut TokenStream) {
     for decl in decls {
         match decl {
             Decl::Function(func) => tokens.extend(compile_function(&func, None)),
-            Decl::ExternFunction(func) => tokens.extend(compile_extern_function(&func)),
-            Decl::ExternObject(_) => {}, 
-            Decl::ExternEnum(_) => {},
-            Decl::ExternImpl(_) => {},
+            Decl::ExternFunction(_) | Decl::ExternObject(_) | Decl::ExternEnum(_) | Decl::ExternImpl(_) | Decl::RustDependency(_, _) => {},
+            Decl::RustBlock(code) => {
+                let comment = format!("// Injected Rust Block\n{}", code);
+                tokens.extend(quote!(#comment));
+            }
             Decl::Module(name, inner) => {
                 let mut inner_tokens = TokenStream::new();
                 compile_decls(inner, &mut inner_tokens);
@@ -379,7 +513,6 @@ fn compile_decls(decls: &[Decl], tokens: &mut TokenStream) {
                 let mut mod_tokens = inner_tokens;
                 let mut parts: Vec<&str> = name.split("::").collect();
                 
-                // If it starts with 'std', remove it.
                 if parts.get(0) == Some(&"std") {
                     parts.remove(0);
                 }
@@ -395,20 +528,20 @@ fn compile_decls(decls: &[Decl], tokens: &mut TokenStream) {
                 let name = quote::format_ident!("{}", obj.name);
                 let gens = if obj.generics.is_empty() { quote!() } else {
                     let gids = obj.generics.iter().map(|g| quote::format_ident!("{}", g));
-                    quote!(<#( #gids: Clone + Copy ),*>)
+                    quote!(<#( #gids: Clone ),*>)
                 };
                 let fields = obj.fields.iter().map(|f| {
                     let fname = quote::format_ident!("{}", f.name);
                     let fty = compile_type(&f.ty);
                     quote! { pub #fname: #fty }
                 });
-                tokens.extend(quote! { #[derive(Clone, Copy, Debug)] pub struct #name #gens { #( #fields ),* } });
+                tokens.extend(quote! { #[derive(Clone, Debug)] pub struct #name #gens { #( #fields ),* } });
             }
             Decl::Enum(enm) => {
                 let name = quote::format_ident!("{}", enm.name);
                 let gens = if enm.generics.is_empty() { quote!() } else {
                     let gids = enm.generics.iter().map(|g| quote::format_ident!("{}", g));
-                    quote!(<#( #gids: Clone + Copy ),*>)
+                    quote!(<#( #gids: Clone ),*>)
                 };
                 let variants = enm.variants.iter().map(|v| {
                     let vname = quote::format_ident!("{}", v.name);
@@ -416,12 +549,12 @@ fn compile_decls(decls: &[Decl], tokens: &mut TokenStream) {
                     if v.types.is_empty() { quote! { #vname } }
                     else { quote! { #vname(#( #vtypes ),*) } }
                 });
-                tokens.extend(quote! { #[derive(Clone, Copy, Debug, PartialEq)] pub enum #name #gens { #( #variants ),* } });
+                tokens.extend(quote! { #[derive(Clone, Debug, PartialEq)] pub enum #name #gens { #( #variants ),* } });
             }
             Decl::Impl(imp) => {
                 let target = compile_id(&imp.target);
                 let gids = imp.generics.iter().map(|g| quote::format_ident!("{}", g));
-                let gparams = if imp.generics.is_empty() { quote!() } else { quote!(<#( #gids: Clone + Copy ),*>) };
+                let gparams = if imp.generics.is_empty() { quote!() } else { quote!(<#( #gids: Clone ),*>) };
                 let gtarget = if imp.generics.is_empty() { quote!() } else {
                     let gids2 = imp.generics.iter().map(|g| quote::format_ident!("{}", g));
                     quote!(<#( #gids2 ),*>)

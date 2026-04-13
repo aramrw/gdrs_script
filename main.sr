@@ -1,5 +1,1 @@
-extern fn std::fs::read_to_string(path: Str) -> String
-
 fn main():
-    var content = std::fs::read_to_string("test.txt")
-    print(content)

@@ -55,15 +55,33 @@ impl SemanticAnalyzer {
     pub fn analyze(&mut self, program: &Program) -> Result<(), String> {
         self.functions.insert("fs::create".to_string(), (vec![Type::Str], Some(Type::File)));
         self.functions.insert("fs::open".to_string(), (vec![Type::Str], Some(Type::File)));
+        self.functions.insert("fs::append".to_string(), (vec![Type::Str], Some(Type::File)));
         self.functions.insert("fs::read".to_string(), (vec![Type::File], Some(Type::String)));
+        self.functions.insert("fs::read_to_string".to_string(), (vec![Type::Str], Some(Type::String)));
         self.functions.insert("fs::write".to_string(), (vec![Type::File, Type::Str], None));
         self.functions.insert("fs::write_string".to_string(), (vec![Type::File, Type::String], None));
 
         // Built-in string methods
         self.functions.insert("str::to_owned_string".to_string(), (vec![Type::Str], Some(Type::String)));
+        self.functions.insert("str::to_string".to_string(), (vec![Type::Str], Some(Type::String)));
+        self.functions.insert("str::len".to_string(), (vec![Type::Str], Some(Type::I32)));
+        self.functions.insert("str::contains".to_string(), (vec![Type::Str, Type::Str], Some(Type::Bool)));
+        self.functions.insert("str::split".to_string(), (vec![Type::Str, Type::Str], Some(Type::Array(Box::new(Type::String), 0))));
+        
         self.functions.insert("string::append".to_string(), (vec![Type::String, Type::Str], None));
         self.functions.insert("string::len".to_string(), (vec![Type::String], Some(Type::I32)));
-        self.functions.insert("str::len".to_string(), (vec![Type::Str], Some(Type::I32)));
+        self.functions.insert("string::contains".to_string(), (vec![Type::String, Type::Str], Some(Type::Bool)));
+        self.functions.insert("string::as_str".to_string(), (vec![Type::String], Some(Type::Str)));
+        self.functions.insert("string::lines".to_string(), (vec![Type::String], Some(Type::Array(Box::new(Type::String), 0))));
+        self.functions.insert("string::split".to_string(), (vec![Type::String, Type::Str], Some(Type::Array(Box::new(Type::String), 0))));
+
+        // Vector methods
+        self.functions.insert("vector::len".to_string(), (vec![Type::Array(Box::new(Type::Generic("T".into())), 0)], Some(Type::I32)));
+        self.functions.insert("vector::get".to_string(), (vec![Type::Array(Box::new(Type::Generic("T".into())), 0), Type::I32], Some(Type::Generic("T".into()))));
+
+        // Primitive methods
+        self.functions.insert("i32::to_string".to_string(), (vec![Type::I32], Some(Type::String)));
+        self.functions.insert("f32::to_string".to_string(), (vec![Type::F32], Some(Type::String)));
 
         // Memory management
         self.functions.insert("mem::free".to_string(), (vec![Type::RawPtr(Box::new(Type::Generic("T".into())), true), Type::I32], None));
@@ -103,9 +121,6 @@ impl SemanticAnalyzer {
                 }
                 Decl::Impl(imp) | Decl::ExternImpl(imp) => {
                     let full_target = if prefix.is_empty() { imp.target.clone() } else { 
-                        // If target is already namespaced (like std::fs::File), don't re-prefix it?
-                        // Actually, if it's IN a module, it might be relative.
-                        // For now, let's assume if it contains :: it's absolute-ish.
                         if imp.target.contains("::") { imp.target.clone() } else { format!("{}::{}", prefix, imp.target) }
                     };
                     self.current_obj = Some(full_target.clone());
@@ -130,7 +145,7 @@ impl SemanticAnalyzer {
         for decl in decls {
             match decl {
                 Decl::Function(func) => {
-                    let full_name = if prefix.is_empty() { func.name.clone() } else { format!("{}::{}", prefix, func.name) };
+                    let _full_name = if prefix.is_empty() { func.name.clone() } else { format!("{}::{}", prefix, func.name) };
                     self.analyze_function(func, None)?;
                 }
                 Decl::Impl(imp) => {
@@ -242,7 +257,7 @@ impl SemanticAnalyzer {
                 let l = self.analyze_expr(lhs)?;
                 let _r = self.analyze_expr(rhs)?;
                 match op {
-                    BinaryOp::GreaterThan | BinaryOp::LessThan => Ok(Type::Bool),
+                    BinaryOp::GreaterThan | BinaryOp::LessThan | BinaryOp::Equal => Ok(Type::Bool),
                     _ => Ok(l),
                 }
             }
@@ -257,20 +272,34 @@ impl SemanticAnalyzer {
             }
             Expr::MethodCall(lhs, name, _args) => {
                 let lhs_ty = self.analyze_expr(lhs)?;
-                let obj_name = match lhs_ty {
-                    Type::Str => "str".to_string(),
-                    Type::String => "string".to_string(),
-                    Type::Custom(n, _) => n,
-                    Type::BoxPtr(inner) | Type::RawPtr(inner, _) => match *inner {
-                        Type::Custom(n, _) => n,
-                        _ => return Err("Method call on non-object".into()),
+                if name == "clone" {
+                    return Ok(lhs_ty);
+                }
+                let (obj_name, _is_array) = match lhs_ty {
+                    Type::Str => ("str".to_string(), false),
+                    Type::String => ("string".to_string(), false),
+                    Type::I32 => ("i32".to_string(), false),
+                    Type::F32 => ("f32".to_string(), false),
+                    Type::Array(_, _) => ("vector".to_string(), true),
+                    Type::Custom(ref n, _) => (n.clone(), false),
+                    Type::BoxPtr(ref inner) | Type::RawPtr(ref inner, _) => match **inner {
+                        Type::Custom(ref n, _) => (n.clone(), false),
+                        _ => return Err(format!("Method call '{}' on non-object type {:?}", name, lhs_ty)),
                     },
-                    _ => return Err("Method call on non-object".into()),
+                    _ => return Err(format!("Method call '{}' on non-object type {:?}", name, lhs_ty)),
                 };
+                
                 let full_name = format!("{}::{}", obj_name, name);
+                
                 if let Some((_, ret_type)) = self.functions.get(&full_name) {
-                    Ok(ret_type.clone().unwrap_or(Type::I32))
-                } else { Err(format!("No method '{}' on {}", name, obj_name)) }
+                    let rt = ret_type.clone().unwrap_or(Type::I32);
+                    if let Type::Generic(_) = rt {
+                        if let Type::Array(inner, _) = lhs_ty { Ok(*inner) }
+                        else { Ok(rt) }
+                    } else { Ok(rt) }
+                } else {
+                    Err(format!("No method '{}' on {}", name, obj_name)) 
+                }
             }
             Expr::StructLiteral { name, fields: _ } => {
                 let target_name = if name == "self" {
@@ -298,7 +327,7 @@ impl SemanticAnalyzer {
                 let actual_ty = match lhs_ty {
                     Type::BoxPtr(inner) => *inner,
                     Type::RawPtr(inner, _) => *inner,
-                    Type::Array(inner, _) => *inner, // Already works for arrays
+                    Type::Array(inner, _) => *inner,
                     _ => return Err("Indexing only works on arrays or pointers".into()),
                 };
                 Ok(actual_ty)
@@ -310,6 +339,16 @@ impl SemanticAnalyzer {
                     AllocKind::RawMut => Ok(Type::RawPtr(Box::new(ty), true)),
                     AllocKind::RawConst => Ok(Type::RawPtr(Box::new(ty), false)),
                 }
+            }
+            Expr::Unwrap(inner) => {
+                let ty = self.analyze_expr(inner)?;
+                match ty {
+                    Type::Result(ok, _) => Ok(*ok),
+                    _ => Ok(ty), 
+                }
+            }
+            Expr::Await(inner) => {
+                self.analyze_expr(inner)
             }
         }
     }

@@ -21,7 +21,9 @@ impl<T> Vector<T>:
             print("vector overflow")
 
     fn get(self, index: i32) -> T:
-        return self.buffer[index]
+        // We need .clone() here to avoid moving out of the raw pointer.
+        // Since our compiler automatically adds T: Clone, we can just call it.
+        return self.buffer[index].clone()
 
     fn destroy(self):
         mem::free(self.buffer, self.cap)

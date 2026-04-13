@@ -7,11 +7,13 @@ pub enum Type {
     Generic(String),
     Custom(String, Vec<Type>),
     SelfType,
+    Result(Box<Type>, Box<Type>),
+    Error,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum BinaryOp {
-    Add, Subtract, Multiply, Divide, GreaterThan, LessThan,
+    Add, Subtract, Multiply, Divide, GreaterThan, LessThan, Equal,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -25,11 +27,13 @@ pub enum Expr {
     Variable(String),
     Binary(Box<Expr>, BinaryOp, Box<Expr>),
     Call(String, Vec<Expr>),
-    MethodCall(Box<Expr>, String, Vec<Expr>), // <--- New!
+    MethodCall(Box<Expr>, String, Vec<Expr>),
     StructLiteral { name: String, fields: Vec<(String, Expr)> },
     MemberAccess(Box<Expr>, String),
     IndexAccess(Box<Expr>, Box<Expr>),
     Alloc(Box<Expr>, AllocKind),
+    Unwrap(Box<Expr>),
+    Await(Box<Expr>),
 }
 
 #[derive(Debug, Clone)]
@@ -72,6 +76,8 @@ pub struct Function {
     pub params: Vec<Param>,
     pub return_type: Option<Type>,
     pub body: Stmt,
+    pub is_async: bool,
+    pub rust_path: Option<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -79,6 +85,7 @@ pub struct ObjectDecl {
     pub name: String,
     pub generics: Vec<String>,
     pub fields: Vec<Field>,
+    pub rust_path: Option<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -89,6 +96,7 @@ pub struct EnumDecl {
     pub name: String,
     pub generics: Vec<String>,
     pub variants: Vec<Variant>,
+    pub rust_path: Option<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -110,6 +118,8 @@ pub enum Decl {
     ExternImpl(ImplDecl),
     Module(String, Vec<Decl>),
     Use(Vec<String>),
+    RustDependency(String, String),
+    RustBlock(String),
 }
 
 #[derive(Debug, Clone)]
