@@ -100,9 +100,13 @@ fn main() {
         let mut decls = Vec::new();
         
         for (mod_name, dep_path) in deps {
+            let mut name_to_use = mod_name.clone();
+            if name_to_use.starts_with("std::") {
+                name_to_use = name_to_use.replace("std::", "");
+            }
             let dep_decls = reconstruct(dep_path, processed, visited);
             if !dep_decls.is_empty() {
-                decls.push(Decl::Module(mod_name.clone(), dep_decls));
+                decls.push(Decl::Module(name_to_use, dep_decls));
             }
         }
         

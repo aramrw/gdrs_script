@@ -1,6 +1,6 @@
 #[derive(Debug, Clone, PartialEq)]
 pub enum Type {
-    I32, F32, Bool, Str, String, File,
+    I32, I64, F32, F64, Bool, Str, String, File,
     Array(Box<Type>, usize),
     BoxPtr(Box<Type>),
     RawPtr(Box<Type>, bool),
@@ -23,7 +23,7 @@ pub enum AllocKind {
 
 #[derive(Debug, Clone)]
 pub enum Expr {
-    Int(i32), Float(f32), Bool(bool), String(String),
+    Int(i32), Int64(i64), Float(f32), Float64(f64), Bool(bool), String(String),
     Variable(String),
     Binary(Box<Expr>, BinaryOp, Box<Expr>),
     Call(String, Vec<Expr>),

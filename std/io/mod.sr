@@ -1,0 +1,5 @@
+extern fn readline() -> string = "sr_io::readline"
+extern fn write(content: str) = "sr_io::write"
+extern fn println(content: str) = "sr_io::println"
+extern fn exit(code: i32) = "sr_io::exit"
+extern fn args() -> [string; 0] = "sr_io::args"

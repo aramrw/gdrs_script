@@ -1,0 +1,7 @@
+extern fn create(path: str) -> file = "sr_fs::create"
+extern fn open(path: str) -> file = "sr_fs::open"
+extern fn append(path: str) -> file = "sr_fs::append"
+extern fn read(f: file) -> string = "sr_fs::read"
+extern fn read_to_string(path: str) -> string = "sr_fs::read_to_string"
+extern fn write(f: file, content: str) = "sr_fs::write"
+extern fn write_string(f: file, content: string) = "sr_fs::write_string"

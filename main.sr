@@ -1,1 +1,24 @@
+use std::math;
+
+obj Circle:
+	r: f32
+	// the arc
+	s: f32
+
+impl Circle:
+	fn theta() -> f32:
+		var mut theta = 0.0
+		theta = circle.s/circle.r
+		theta
+
 fn main():
+	var circle = Circle { r: 40.0, s: 12.0 }
+	var theta = circle.theta()
+
+	print("theta: " + theta.to_string())
+	var theta_dgr = math::rad_to_dgr_f32(theta)
+	print("in degrees: " + theta_dgr)
+
+	match theta_dgr > 17.1:
+		true => print("correct answer")
+		false => print("false")

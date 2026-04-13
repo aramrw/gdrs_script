@@ -7,6 +7,7 @@ pub struct SemanticAnalyzer {
     enums: HashMap<String, HashMap<String, Vec<Type>>>,
     symbols: HashMap<String, (Type, bool)>,
     current_obj: Option<String>,
+    current_prefix: String,
 }
 
 impl SemanticAnalyzer {
@@ -17,6 +18,7 @@ impl SemanticAnalyzer {
             enums: HashMap::new(),
             symbols: HashMap::new(),
             current_obj: None,
+            current_prefix: String::new(),
         }
     }
 
@@ -24,6 +26,8 @@ impl SemanticAnalyzer {
         match (a, b) {
             (Type::Str, Type::Str) => true,
             (Type::String, Type::String) => true,
+            (Type::Str, Type::String) => true,
+            (Type::String, Type::Str) => true,
             (Type::File, Type::Custom(n, _)) if n == "std::fs::File" => true,
             (Type::Custom(n, _), Type::File) if n == "std::fs::File" => true,
             (Type::Array(t1, _), Type::Array(t2, _)) => self.types_equal(t1, t2),
@@ -61,6 +65,12 @@ impl SemanticAnalyzer {
         self.functions.insert("fs::write".to_string(), (vec![Type::File, Type::Str], None));
         self.functions.insert("fs::write_string".to_string(), (vec![Type::File, Type::String], None));
 
+        self.functions.insert("io::readline".to_string(), (vec![], Some(Type::String)));
+        self.functions.insert("io::write".to_string(), (vec![Type::Str], None));
+        self.functions.insert("io::println".to_string(), (vec![Type::Str], None));
+        self.functions.insert("io::exit".to_string(), (vec![Type::I32], None));
+        self.functions.insert("io::args".to_string(), (vec![], Some(Type::Array(Box::new(Type::String), 0))));
+
         // Built-in string methods
         self.functions.insert("str::to_owned_string".to_string(), (vec![Type::Str], Some(Type::String)));
         self.functions.insert("str::to_string".to_string(), (vec![Type::Str], Some(Type::String)));
@@ -81,7 +91,68 @@ impl SemanticAnalyzer {
 
         // Primitive methods
         self.functions.insert("i32::to_string".to_string(), (vec![Type::I32], Some(Type::String)));
+        self.functions.insert("i64::to_string".to_string(), (vec![Type::I64], Some(Type::String)));
         self.functions.insert("f32::to_string".to_string(), (vec![Type::F32], Some(Type::String)));
+        self.functions.insert("f64::to_string".to_string(), (vec![Type::F64], Some(Type::String)));
+        
+        self.functions.insert("f32::sin".to_string(), (vec![Type::F32], Some(Type::F32)));
+        self.functions.insert("f32::cos".to_string(), (vec![Type::F32], Some(Type::F32)));
+        self.functions.insert("f32::tan".to_string(), (vec![Type::F32], Some(Type::F32)));
+        self.functions.insert("f32::sqrt".to_string(), (vec![Type::F32], Some(Type::F32)));
+        self.functions.insert("f32::abs".to_string(), (vec![Type::F32], Some(Type::F32)));
+        self.functions.insert("f32::floor".to_string(), (vec![Type::F32], Some(Type::F32)));
+        self.functions.insert("f32::ceil".to_string(), (vec![Type::F32], Some(Type::F32)));
+        self.functions.insert("f32::pow".to_string(), (vec![Type::F32, Type::F32], Some(Type::F32)));
+        self.functions.insert("f32::exp".to_string(), (vec![Type::F32], Some(Type::F32)));
+        self.functions.insert("f32::ln".to_string(), (vec![Type::F32], Some(Type::F32)));
+        self.functions.insert("f32::log10".to_string(), (vec![Type::F32], Some(Type::F32)));
+        self.functions.insert("f32::asin".to_string(), (vec![Type::F32], Some(Type::F32)));
+        self.functions.insert("f32::acos".to_string(), (vec![Type::F32], Some(Type::F32)));
+        self.functions.insert("f32::atan".to_string(), (vec![Type::F32], Some(Type::F32)));
+        self.functions.insert("f32::to_degrees".to_string(), (vec![Type::F32], Some(Type::F32)));
+        self.functions.insert("f32::to_radians".to_string(), (vec![Type::F32], Some(Type::F32)));
+
+        self.functions.insert("f64::sin".to_string(), (vec![Type::F64], Some(Type::F64)));
+        self.functions.insert("f64::cos".to_string(), (vec![Type::F64], Some(Type::F64)));
+        self.functions.insert("f64::tan".to_string(), (vec![Type::F64], Some(Type::F64)));
+        self.functions.insert("f64::sqrt".to_string(), (vec![Type::F64], Some(Type::F64)));
+        self.functions.insert("f64::abs".to_string(), (vec![Type::F64], Some(Type::F64)));
+        self.functions.insert("f64::floor".to_string(), (vec![Type::F64], Some(Type::F64)));
+        self.functions.insert("f64::ceil".to_string(), (vec![Type::F64], Some(Type::F64)));
+        self.functions.insert("f64::pow".to_string(), (vec![Type::F64, Type::F64], Some(Type::F64)));
+        self.functions.insert("f64::exp".to_string(), (vec![Type::F64], Some(Type::F64)));
+        self.functions.insert("f64::ln".to_string(), (vec![Type::F64], Some(Type::F64)));
+        self.functions.insert("f64::log10".to_string(), (vec![Type::F64], Some(Type::F64)));
+        self.functions.insert("f64::asin".to_string(), (vec![Type::F64], Some(Type::F64)));
+        self.functions.insert("f64::acos".to_string(), (vec![Type::F64], Some(Type::F64)));
+        self.functions.insert("f64::atan".to_string(), (vec![Type::F64], Some(Type::F64)));
+        self.functions.insert("f64::to_degrees".to_string(), (vec![Type::F64], Some(Type::F64)));
+        self.functions.insert("f64::to_radians".to_string(), (vec![Type::F64], Some(Type::F64)));
+
+        self.functions.insert("math::pi".to_string(), (vec![], Some(Type::F32)));
+        self.functions.insert("math::e".to_string(), (vec![], Some(Type::F32)));
+        self.functions.insert("math::tau".to_string(), (vec![], Some(Type::F32)));
+        self.functions.insert("math::pi64".to_string(), (vec![], Some(Type::F64)));
+        self.functions.insert("math::e64".to_string(), (vec![], Some(Type::F64)));
+        self.functions.insert("math::tau64".to_string(), (vec![], Some(Type::F64)));
+
+        self.functions.insert("math::sin".to_string(), (vec![Type::F32], Some(Type::F32)));
+        self.functions.insert("math::cos".to_string(), (vec![Type::F32], Some(Type::F32)));
+        self.functions.insert("math::tan".to_string(), (vec![Type::F32], Some(Type::F32)));
+        self.functions.insert("math::sqrt".to_string(), (vec![Type::F32], Some(Type::F32)));
+        self.functions.insert("math::abs".to_string(), (vec![Type::F32], Some(Type::F32)));
+        self.functions.insert("math::floor".to_string(), (vec![Type::F32], Some(Type::F32)));
+        self.functions.insert("math::ceil".to_string(), (vec![Type::F32], Some(Type::F32)));
+        self.functions.insert("math::pow".to_string(), (vec![Type::F32, Type::F32], Some(Type::F32)));
+
+        self.functions.insert("math::sin64".to_string(), (vec![Type::F64], Some(Type::F64)));
+        self.functions.insert("math::cos64".to_string(), (vec![Type::F64], Some(Type::F64)));
+        self.functions.insert("math::tan64".to_string(), (vec![Type::F64], Some(Type::F64)));
+        self.functions.insert("math::sqrt64".to_string(), (vec![Type::F64], Some(Type::F64)));
+        self.functions.insert("math::abs64".to_string(), (vec![Type::F64], Some(Type::F64)));
+        self.functions.insert("math::floor64".to_string(), (vec![Type::F64], Some(Type::F64)));
+        self.functions.insert("math::ceil64".to_string(), (vec![Type::F64], Some(Type::F64)));
+        self.functions.insert("math::pow64".to_string(), (vec![Type::F64, Type::F64], Some(Type::F64)));
 
         // Memory management
         self.functions.insert("mem::free".to_string(), (vec![Type::RawPtr(Box::new(Type::Generic("T".into())), true), Type::I32], None));
@@ -142,11 +213,14 @@ impl SemanticAnalyzer {
     }
 
     fn analyze_decls(&mut self, decls: &[Decl], prefix: &str) -> Result<(), String> {
+        let old_prefix = std::mem::replace(&mut self.current_prefix, prefix.to_string());
         for decl in decls {
             match decl {
                 Decl::Function(func) => {
-                    let _full_name = if prefix.is_empty() { func.name.clone() } else { format!("{}::{}", prefix, func.name) };
                     self.analyze_function(func, None)?;
+                }
+                Decl::ExternFunction(_func) => {
+                    // No body to analyze
                 }
                 Decl::Impl(imp) => {
                     let full_target = if prefix.is_empty() { imp.target.clone() } else { 
@@ -161,6 +235,7 @@ impl SemanticAnalyzer {
                 _ => {}
             }
         }
+        self.current_prefix = old_prefix;
         Ok(())
     }
 
@@ -246,7 +321,9 @@ impl SemanticAnalyzer {
     fn analyze_expr(&self, expr: &Expr) -> Result<Type, String> {
         match expr {
             Expr::Int(_) => Ok(Type::I32),
+            Expr::Int64(_) => Ok(Type::I64),
             Expr::Float(_) => Ok(Type::F32),
+            Expr::Float64(_) => Ok(Type::F64),
             Expr::Bool(_) => Ok(Type::Bool),
             Expr::String(_) => Ok(Type::Str),
             Expr::Variable(name) => {
@@ -255,9 +332,23 @@ impl SemanticAnalyzer {
             }
             Expr::Binary(lhs, op, rhs) => {
                 let l = self.analyze_expr(lhs)?;
-                let _r = self.analyze_expr(rhs)?;
+                let r = self.analyze_expr(rhs)?;
+                
+                if *op == BinaryOp::Add {
+                    let is_l_string = l == Type::String || l == Type::Str;
+                    let is_r_string = r == Type::String || r == Type::Str;
+                    
+                    if is_l_string || is_r_string {
+                        return Ok(Type::String);
+                    }
+                }
+
+                if !self.types_equal(&l, &r) {
+                    return Err(format!("Type mismatch in binary operation: {:?} and {:?}", l, r));
+                }
                 match op {
                     BinaryOp::GreaterThan | BinaryOp::LessThan | BinaryOp::Equal => Ok(Type::Bool),
+                    BinaryOp::Add => Ok(l),
                     _ => Ok(l),
                 }
             }
@@ -266,7 +357,17 @@ impl SemanticAnalyzer {
                     let val_ty = self.analyze_expr(&args[0])?;
                     return Ok(Type::Array(Box::new(val_ty), 0));
                 }
-                if let Some((_, ret_type)) = self.functions.get(name) {
+                
+                // Try looking up with prefix if it's a simple name
+                let name_to_lookup = if !name.contains("::") && !self.current_prefix.is_empty() {
+                    format!("{}::{}", self.current_prefix, name)
+                } else {
+                    name.clone()
+                };
+
+                if let Some((_, ret_type)) = self.functions.get(&name_to_lookup) {
+                    Ok(ret_type.clone().unwrap_or(Type::I32))
+                } else if let Some((_, ret_type)) = self.functions.get(name) {
                     Ok(ret_type.clone().unwrap_or(Type::I32))
                 } else { Err(format!("Undeclared function or variant '{}'", name)) }
             }
@@ -279,7 +380,9 @@ impl SemanticAnalyzer {
                     Type::Str => ("str".to_string(), false),
                     Type::String => ("string".to_string(), false),
                     Type::I32 => ("i32".to_string(), false),
+                    Type::I64 => ("i64".to_string(), false),
                     Type::F32 => ("f32".to_string(), false),
+                    Type::F64 => ("f64".to_string(), false),
                     Type::Array(_, _) => ("vector".to_string(), true),
                     Type::Custom(ref n, _) => (n.clone(), false),
                     Type::BoxPtr(ref inner) | Type::RawPtr(ref inner, _) => match **inner {

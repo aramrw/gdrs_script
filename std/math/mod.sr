@@ -1,0 +1,33 @@
+extern fn sin(x: f32) -> f32 = "f32::sin"
+extern fn cos(x: f32) -> f32 = "f32::cos"
+extern fn tan(x: f32) -> f32 = "f32::tan"
+extern fn sqrt(x: f32) -> f32 = "f32::sqrt"
+extern fn abs(x: f32) -> f32 = "f32::abs"
+extern fn floor(x: f32) -> f32 = "f32::floor"
+extern fn ceil(x: f32) -> f32 = "f32::ceil"
+extern fn pow(x: f32, y: f32) -> f32 = "f32::powf"
+
+extern fn sin64(x: f64) -> f64 = "f64::sin"
+extern fn cos64(x: f64) -> f64 = "f64::cos"
+extern fn tan64(x: f64) -> f64 = "f64::tan"
+extern fn sqrt64(x: f64) -> f64 = "f64::sqrt"
+extern fn abs64(x: f64) -> f64 = "f64::abs"
+extern fn floor64(x: f64) -> f64 = "f64::floor"
+extern fn ceil64(x: f64) -> f64 = "f64::ceil"
+extern fn pow64(x: f64, y: f64) -> f64 = "f64::powf"
+
+extern fn pi() -> f32 = "sr_math::pi"
+extern fn e() -> f32 = "sr_math::e"
+extern fn tau() -> f32 = "sr_math::tau"
+
+extern fn pi64() -> f64 = "sr_math::pi64"
+extern fn e64() -> f64 = "sr_math::e64"
+extern fn tau64() -> f64 = "sr_math::tau64"
+
+fn rad_to_dgr_f32(rad: f32) -> f32:
+	var formula = 180.0/pi()
+	rad * formula
+
+fn rad_to_dgr_f64(rad: f64) -> f64:
+	var formula = 180.0f64/pi64()
+	rad * formula

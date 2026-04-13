@@ -1,9 +1,9 @@
 use crate::ast::*;
 use proc_macro2::TokenStream;
 use quote::quote;
+use std::collections::HashMap;
 use std::fs;
 use std::process::Command;
-use std::collections::HashMap;
 use std::sync::Mutex;
 
 lazy_static::lazy_static! {
@@ -14,50 +14,57 @@ fn compile_id(name: &str) -> TokenStream {
     // Check for explicit rust mapping
     if let Ok(mappings) = RUST_MAPPINGS.lock() {
         if let Some(rust_path) = mappings.get(name) {
-            let parts: Vec<TokenStream> = rust_path.split("::").map(|p| {
-                let id = quote::format_ident!("{}", p);
-                quote!(#id)
-            }).collect();
+            let parts: Vec<TokenStream> = rust_path
+                .split("::")
+                .map(|p| {
+                    let id = quote::format_ident!("{}", p);
+                    quote!(#id)
+                })
+                .collect();
             return quote!(#( #parts )::*);
         }
     }
 
     if name.contains("::") {
         let mut parts: Vec<&str> = name.split("::").collect();
-        
+
         // Strip 'std' from our known internal std modules.
         if parts.get(0) == Some(&"std") && parts.len() > 1 {
             let second = parts[1];
-            if second == "util" || second == "vec" || second == "fs" {
+            if second == "option" || second == "vec" || second == "fs" || second == "math" || second == "io" {
                 parts.remove(0);
             }
         }
 
-        // If it's a root-level module we defined (mem, fs, math, util, vec), 
+        // If it's a root-level module we defined (mem, sr_fs, sr_math, util, vec, sr_io),
         // prepend crate:: so it's accessible from anywhere.
-        let mut first = parts[0];
-        if first == "fs" { first = "sr_fs"; parts[0] = "sr_fs"; }
+        let first = parts[0];
 
-        let root_modules = ["mem", "sr_fs", "math", "util", "vec"];
+        let root_modules = ["mem", "sr_fs", "sr_io", "sr_math", "util", "vec"];
         if root_modules.contains(&first) {
-            let tokens: Vec<TokenStream> = parts.iter().map(|p| {
-                let id = quote::format_ident!("{}", p);
-                quote!(#id)
-            }).collect();
+            let tokens: Vec<TokenStream> = parts
+                .iter()
+                .map(|p| {
+                    let id = quote::format_ident!("{}", p);
+                    quote!(#id)
+                })
+                .collect();
             return quote!(crate::#( #tokens )::*);
         }
 
-        let tokens: Vec<TokenStream> = parts.iter().map(|p| {
-            let id = quote::format_ident!("{}", p);
-            quote!(#id)
-        }).collect();
+        let tokens: Vec<TokenStream> = parts
+            .iter()
+            .map(|p| {
+                let id = quote::format_ident!("{}", p);
+                quote!(#id)
+            })
+            .collect();
         quote!(#( #tokens )::*)
     } else {
         // If it's a known root-level module, also prepend crate::
-        let mut name_to_use = name;
-        if name == "fs" { name_to_use = "sr_fs"; }
+        let name_to_use = name;
 
-        let root_modules = ["mem", "sr_fs", "math", "util", "vec"];
+        let root_modules = ["mem", "sr_fs", "sr_io", "sr_math", "util", "vec"];
         if root_modules.contains(&name_to_use) {
             let id = quote::format_ident!("{}", name_to_use);
             return quote!(crate::#id);
@@ -70,7 +77,9 @@ fn compile_id(name: &str) -> TokenStream {
 fn compile_type(ty: &Type) -> TokenStream {
     match ty {
         Type::I32 => quote!(i32),
+        Type::I64 => quote!(i64),
         Type::F32 => quote!(f32),
+        Type::F64 => quote!(f64),
         Type::Bool => quote!(bool),
         Type::Str => quote!(&str),
         Type::String => quote!(String),
@@ -81,7 +90,11 @@ fn compile_type(ty: &Type) -> TokenStream {
         }
         Type::RawPtr(inner, mutable) => {
             let t = compile_type(inner);
-            if *mutable { quote!(*mut #t) } else { quote!(*const #t) }
+            if *mutable {
+                quote!(*mut #t)
+            } else {
+                quote!(*const #t)
+            }
         }
         Type::Array(inner, _) => {
             let t = compile_type(inner);
@@ -93,8 +106,9 @@ fn compile_type(ty: &Type) -> TokenStream {
         }
         Type::Custom(name, generics) => {
             let id = compile_id(name);
-            if generics.is_empty() { quote!(#id) }
-            else {
+            if generics.is_empty() {
+                quote!(#id)
+            } else {
                 let gens = generics.iter().map(compile_type);
                 quote!(#id<#( #gens ),*>)
             }
@@ -115,16 +129,30 @@ fn compile_pattern(pat: &Pattern) -> TokenStream {
             let eid = compile_id(enm);
             let vid = quote::format_ident!("{}", var);
             let pids = params.iter().map(|p| quote::format_ident!("{}", p));
-            if params.is_empty() { quote! { #eid::#vid } }
-            else { quote! { #eid::#vid(#( #pids ),*) } }
+            if params.is_empty() {
+                quote! { #eid::#vid }
+            } else {
+                quote! { #eid::#vid(#( #pids ),*) }
+            }
         }
-        Pattern::Variable(n) => { let id = quote::format_ident!("{}", n); quote! { #id } }
+        Pattern::Variable(n) => {
+            let id = quote::format_ident!("{}", n);
+            quote! { #id }
+        }
         Pattern::Literal(e) => compile_expr(e, None),
     }
 }
 
 fn rename_method(name: &str) -> String {
-    let solar_methods = ["append", "len", "contains", "to_string", "lines", "split", "get"];
+    let solar_methods = [
+        "append",
+        "len",
+        "contains",
+        "to_string",
+        "lines",
+        "split",
+        "get",
+    ];
     if solar_methods.contains(&name) {
         format!("solar_{}", name)
     } else {
@@ -135,11 +163,18 @@ fn rename_method(name: &str) -> String {
 fn compile_expr(expr: &Expr, target_obj: Option<&String>) -> TokenStream {
     match expr {
         Expr::Int(v) => quote! { #v },
-        Expr::Float(v) => quote! { #v as f32 },
+        Expr::Int64(v) => quote! { #v },
+        Expr::Float(v) => quote! { (#v as f32) },
+        Expr::Float64(v) => quote! { (#v as f64) },
         Expr::Bool(v) => quote! { #v },
         Expr::String(v) => quote! { #v },
         Expr::Variable(n) => {
-            let id = if n == "self" { quote!(self) } else { let id = quote::format_ident!("{}", n); quote!(#id) };
+            let id = if n == "self" {
+                quote!(self)
+            } else {
+                let id = quote::format_ident!("{}", n);
+                quote!(#id)
+            };
             quote! { #id }
         }
         Expr::Binary(lhs, op, rhs) => {
@@ -147,35 +182,32 @@ fn compile_expr(expr: &Expr, target_obj: Option<&String>) -> TokenStream {
             let r = compile_expr(rhs, target_obj);
             match op {
                 BinaryOp::Add => {
-                    let l_str = format!("{:?}", l);
-                    let r_str = format!("{:?}", r);
-                    if l_str.contains("\"") || l_str.contains("to_string") || l_str.contains("to_owned_string") || l_str.contains("as_str") ||
-                       r_str.contains("\"") || r_str.contains("to_string") || r_str.contains("to_owned_string") || r_str.contains("as_str") {
-                        quote! { format!("{}{}", #l, #r) }
-                    } else {
-                        quote! { (#l + #r) }
-                    }
+                    quote! { (#l).solar_add(&#r) }
                 }
-                BinaryOp::Subtract => quote! { (#l - #r) },
-                BinaryOp::Multiply => quote! { (#l * #r) },
-                BinaryOp::Divide => quote! { (#l / #r) },
-                BinaryOp::GreaterThan => quote! { (#l > #r) },
-                BinaryOp::LessThan => quote! { (#l < #r) },
-                BinaryOp::Equal => quote! { (#l == #r) },
+                BinaryOp::Subtract => quote! { (#l).solar_sub(&#r) },
+                BinaryOp::Multiply => quote! { (#l).solar_mul(&#r) },
+                BinaryOp::Divide => quote! { (#l).solar_div(&#r) },
+                BinaryOp::GreaterThan => quote! { (#l).solar_gt(&#r) },
+                BinaryOp::LessThan => quote! { (#l).solar_lt(&#r) },
+                BinaryOp::Equal => quote! { (#l).solar_eq(&#r) },
             }
         }
         Expr::Call(name, args) => {
             if name == "array_init" {
+                let element = compile_expr(&args[0], target_obj);
                 let size = compile_expr(&args[1], target_obj);
                 return quote! { unsafe {
-                    let mut v: Vec<_> = (0..#size).map(|_| std::mem::zeroed()).collect();
+                    let mut v: Vec<_> = (0..crate::SolarAsSize::as_size(&#size)).map(|_| crate::SolarAsVal::as_val(&#element)).collect();
                     let p = v.as_mut_ptr();
                     std::mem::forget(v);
                     p
                 } };
             }
             let id = compile_id(name);
-            let args = args.iter().map(|a| compile_expr(a, target_obj));
+            let args = args.iter().map(|a| {
+                let e = compile_expr(a, target_obj);
+                quote!(SolarAsArg::as_arg(&#e))
+            });
             quote! { #id(#( #args ),*) }
         }
         Expr::MethodCall(lhs, name, args) => {
@@ -183,19 +215,27 @@ fn compile_expr(expr: &Expr, target_obj: Option<&String>) -> TokenStream {
             let name_to_use = rename_method(name);
 
             let id = quote::format_ident!("{}", name_to_use);
-            let args = args.iter().map(|a| compile_expr(a, target_obj));
+            let args = args.iter().map(|a| {
+                let e = compile_expr(a, target_obj);
+                quote!(SolarAsArg::as_arg(&#e))
+            });
             quote! { #l.#id(#( #args ),*) }
         }
         Expr::StructLiteral { name, fields } => {
             let target_name = if name == "self" {
-                if let Some(t) = target_obj { t.clone() }
-                else { "Self".to_string() }
-            } else { name.clone() };
+                if let Some(t) = target_obj {
+                    t.clone()
+                } else {
+                    "Self".to_string()
+                }
+            } else {
+                name.clone()
+            };
             let id = compile_id(&target_name);
             let fields = fields.iter().map(|(n, v)| {
                 let fname = quote::format_ident!("{}", n);
                 let fval = compile_expr(v, target_obj);
-                quote! { #fname: #fval }
+                quote! { #fname: crate::SolarAsVal::as_val(&#fval) }
             });
             quote! { #id { #( #fields ),* } }
         }
@@ -207,7 +247,7 @@ fn compile_expr(expr: &Expr, target_obj: Option<&String>) -> TokenStream {
         Expr::IndexAccess(lhs, index) => {
             let l = compile_expr(lhs, target_obj);
             let i = compile_expr(index, target_obj);
-            quote! { (unsafe { &*#l.add(#i as usize) }) }
+            quote! { (unsafe { &*#l.add(crate::SolarAsSize::as_size(&#i)) }) }
         }
         Expr::Alloc(inner, kind) => {
             let e = compile_expr(inner, target_obj);
@@ -230,12 +270,20 @@ fn compile_expr(expr: &Expr, target_obj: Option<&String>) -> TokenStream {
 
 fn compile_stmt(stmt: &Stmt, is_last: bool, target_obj: Option<&String>) -> TokenStream {
     match stmt {
-        Stmt::VarDecl { name, is_mutable, ty, value } => {
+        Stmt::VarDecl {
+            name,
+            is_mutable,
+            ty,
+            value,
+        } => {
             let id = quote::format_ident!("{}", name);
             let mut_kw = if *is_mutable { quote!(mut) } else { quote!() };
             let val = compile_expr(value, target_obj);
             let ty_tokens = match ty {
-                Some(t) => { let ct = compile_type(t); quote!(: #ct) }
+                Some(t) => {
+                    let ct = compile_type(t);
+                    quote!(: #ct)
+                }
                 None => quote!(),
             };
             quote! { let #mut_kw #id #ty_tokens = #val; }
@@ -245,17 +293,21 @@ fn compile_stmt(stmt: &Stmt, is_last: bool, target_obj: Option<&String>) -> Toke
             if let Expr::IndexAccess(lhs, index) = target {
                 let l = compile_expr(lhs, target_obj);
                 let i = compile_expr(index, target_obj);
-                quote! { unsafe { *#l.add(#i as usize) = #v; } }
+                quote! { unsafe { *#l.add(crate::SolarAsSize::as_size(&#i)) = crate::SolarAsVal::as_val(&#v); } }
             } else {
                 let t = compile_expr(target, target_obj);
-                quote! { #t = #v; }
+                quote! { #t = crate::SolarAsVal::as_val(&#v); }
             }
         }
         Stmt::Print(expr) => {
             let e = compile_expr(expr, target_obj);
-            quote! { println!("{:?}", &#e); }
+            quote! { println!("{}", &#e); }
         }
-        Stmt::If { condition, then_branch, else_branch } => {
+        Stmt::If {
+            condition,
+            then_branch,
+            else_branch,
+        } => {
             let cond = compile_expr(condition, target_obj);
             let then = compile_stmt(then_branch, is_last, target_obj);
             match else_branch {
@@ -273,17 +325,27 @@ fn compile_stmt(stmt: &Stmt, is_last: bool, target_obj: Option<&String>) -> Toke
         }
         Stmt::Block(stmts) => {
             let len = stmts.len();
-            let tokens = stmts.iter().enumerate().map(|(i, s)| compile_stmt(s, is_last && i == len - 1, target_obj));
+            let tokens = stmts
+                .iter()
+                .enumerate()
+                .map(|(i, s)| compile_stmt(s, is_last && i == len - 1, target_obj));
             quote! { { #( #tokens )* } }
         }
         Stmt::ExprStmt(expr) => {
             let e = compile_expr(expr, target_obj);
-            if is_last { quote! { return #e; } } else { quote! { #e; } }
+            if is_last {
+                quote! { return #e; }
+            } else {
+                quote! { #e; }
+            }
         }
         Stmt::Return(expr) => {
             let e = expr.as_ref().map(|e| compile_expr(e, target_obj));
-            if let Some(tokens) = e { quote! { return #tokens; } }
-            else { quote! { return; } }
+            if let Some(tokens) = e {
+                quote! { return #tokens; }
+            } else {
+                quote! { return; }
+            }
         }
         Stmt::Match { expr, arms } => {
             let e = compile_expr(expr, target_obj);
@@ -300,25 +362,44 @@ fn compile_stmt(stmt: &Stmt, is_last: bool, target_obj: Option<&String>) -> Toke
 fn compile_function(func: &Function, target_obj: Option<&String>) -> TokenStream {
     let name_to_use = rename_method(&func.name);
     let name = quote::format_ident!("{}", name_to_use);
-    let async_kw = if func.is_async { quote!(async) } else { quote!() };
-    let main_attr = if func.name == "main" && func.is_async { quote!(#[tokio::main]) } else { quote!() };
+    let async_kw = if func.is_async {
+        quote!(async)
+    } else {
+        quote!()
+    };
+    let main_attr = if func.name == "main" && func.is_async {
+        quote!(#[tokio::main])
+    } else {
+        quote!()
+    };
 
-    let gens = if func.generics.is_empty() { quote!() } else {
+    let gens = if func.generics.is_empty() {
+        quote!()
+    } else {
         let gids = func.generics.iter().map(|g| quote::format_ident!("{}", g));
         quote!(<#( #gids: Clone ),*>)
     };
     let params = func.params.iter().map(|p| {
         let p_name = quote::format_ident!("{}", p.name);
-        let p_ty = compile_type(&p.ty);
         if p.name == "self" {
-            if p.is_mutable { quote!(&mut self) } else { quote!(&self) }
+            if p.is_mutable {
+                quote!(&mut self)
+            } else {
+                quote!(&self)
+            }
+        } else if p.ty == Type::Str {
+            quote! { #p_name: impl AsRef<str> }
         } else {
+            let p_ty = compile_type(&p.ty);
             let mut_kw = if p.is_mutable { quote!(mut) } else { quote!() };
-            quote! { #mut_kw #p_name: #p_ty }
+            quote! { #mut_kw #p_name: &#p_ty }
         }
     });
     let ret_type = match &func.return_type {
-        Some(ty) => { let t = compile_type(ty); quote!(-> #t) }
+        Some(ty) => {
+            let t = compile_type(ty);
+            quote!(-> #t)
+        }
         None => quote!(),
     };
     let body = compile_stmt(&func.body, true, target_obj);
@@ -335,11 +416,27 @@ pub fn compile(program: Program) {
         mappings.clear();
         for decl in &program.declarations {
             match decl {
-                Decl::ExternFunction(f) => { if let Some(p) = &f.rust_path { mappings.insert(f.name.clone(), p.clone()); } }
-                Decl::ExternObject(o) => { if let Some(p) = &o.rust_path { mappings.insert(o.name.clone(), p.clone()); } }
-                Decl::ExternEnum(e) => { if let Some(p) = &e.rust_path { mappings.insert(e.name.clone(), p.clone()); } }
-                Decl::RustDependency(name, version) => { dependencies.push((name.clone(), version.clone())); }
-                Decl::Function(f) if f.name == "main" && f.is_async => { use_tokio = true; }
+                Decl::ExternFunction(f) => {
+                    if let Some(p) = &f.rust_path {
+                        mappings.insert(f.name.clone(), p.clone());
+                    }
+                }
+                Decl::ExternObject(o) => {
+                    if let Some(p) = &o.rust_path {
+                        mappings.insert(o.name.clone(), p.clone());
+                    }
+                }
+                Decl::ExternEnum(e) => {
+                    if let Some(p) = &e.rust_path {
+                        mappings.insert(e.name.clone(), p.clone());
+                    }
+                }
+                Decl::RustDependency(name, version) => {
+                    dependencies.push((name.clone(), version.clone()));
+                }
+                Decl::Function(f) if f.name == "main" && f.is_async => {
+                    use_tokio = true;
+                }
                 _ => {}
             }
         }
@@ -357,47 +454,133 @@ pub fn compile(program: Program) {
             fn to_owned_string(&self) -> String;
             fn solar_to_string(&self) -> String;
             fn solar_len(&self) -> i32;
-            fn solar_contains(&self, s: &str) -> bool;
-            fn solar_split(&self, s: &str) -> Vec<String>;
+            fn solar_contains(&self, s: impl AsRef<str>) -> bool;
+            fn solar_split(&self, s: impl AsRef<str>) -> Vec<String>;
         }
         impl SolarStr for str {
             fn to_owned_string(&self) -> String { self.to_owned() }
             fn solar_to_string(&self) -> String { self.to_owned() }
             fn solar_len(&self) -> i32 { self.len() as i32 }
-            fn solar_contains(&self, s: &str) -> bool { self.contains(s) }
-            fn solar_split(&self, s: &str) -> Vec<String> { self.split(s).map(|x| x.to_owned()).collect() }
+            fn solar_contains(&self, s: impl AsRef<str>) -> bool { self.contains(s.as_ref()) }
+            fn solar_split(&self, s: impl AsRef<str>) -> Vec<String> { self.split(s.as_ref()).map(|x| x.to_owned()).collect() }
         }
 
         pub trait SolarString {
-            fn solar_append(&mut self, s: &str);
+            fn solar_append(&mut self, s: impl AsRef<str>);
             fn solar_len(&self) -> i32;
-            fn solar_contains(&self, s: &str) -> bool;
+            fn solar_contains(&self, s: impl AsRef<str>) -> bool;
             fn as_str(&self) -> &str;
             fn solar_lines(&self) -> Vec<String>;
-            fn solar_split(&self, s: &str) -> Vec<String>;
+            fn solar_split(&self, s: impl AsRef<str>) -> Vec<String>;
         }
         impl SolarString for String {
-            fn solar_append(&mut self, s: &str) { self.push_str(s); }
+            fn solar_append(&mut self, s: impl AsRef<str>) { self.push_str(s.as_ref()); }
             fn solar_len(&self) -> i32 { self.len() as i32 }
-            fn solar_contains(&self, s: &str) -> bool { self.contains(s) }
+            fn solar_contains(&self, s: impl AsRef<str>) -> bool { self.contains(s.as_ref()) }
             fn as_str(&self) -> &str { self.as_str() }
             fn solar_lines(&self) -> Vec<String> { self.lines().map(|x| x.to_owned()).collect() }
-            fn solar_split(&self, s: &str) -> Vec<String> { self.split(s).map(|x| x.to_owned()).collect() }
+            fn solar_split(&self, s: impl AsRef<str>) -> Vec<String> { self.split(s.as_ref()).map(|x| x.to_owned()).collect() }
         }
 
         pub trait SolarVec<T> {
             fn solar_len(&self) -> i32;
-            fn solar_get(&self, i: i32) -> T;
+            fn solar_get(&self, i: &i32) -> T;
         }
         impl<T: Clone> SolarVec<T> for Vec<T> {
             fn solar_len(&self) -> i32 { self.len() as i32 }
-            fn solar_get(&self, i: i32) -> T { self[i as usize].clone() }
+            fn solar_get(&self, i: &i32) -> T { self[*i as usize].clone() }
         }
+
+        pub trait SolarAdd<Rhs = Self> {
+            type Output;
+            fn solar_add(&self, rhs: &Rhs) -> Self::Output;
+        }
+
+        impl SolarAdd for i32 { type Output = i32; fn solar_add(&self, rhs: &i32) -> i32 { *self + *rhs } }
+        impl SolarAdd for i64 { type Output = i64; fn solar_add(&self, rhs: &i64) -> i64 { *self + *rhs } }
+        impl SolarAdd for f32 { type Output = f32; fn solar_add(&self, rhs: &f32) -> f32 { *self + *rhs } }
+        impl SolarAdd for f64 { type Output = f64; fn solar_add(&self, rhs: &f64) -> f64 { *self + *rhs } }
+
+        impl SolarAdd<&str> for &str { type Output = String; fn solar_add(&self, rhs: &&str) -> String { format!("{}{}", self, rhs) } }
+        impl SolarAdd<String> for &str { type Output = String; fn solar_add(&self, rhs: &String) -> String { format!("{}{}", self, rhs) } }
+        impl SolarAdd<&str> for String { type Output = String; fn solar_add(&self, rhs: &&str) -> String { format!("{}{}", self, rhs) } }
+        impl SolarAdd<String> for String { type Output = String; fn solar_add(&self, rhs: &String) -> String { format!("{}{}", self, rhs) } }
+
+        impl SolarAdd<i32> for &str { type Output = String; fn solar_add(&self, rhs: &i32) -> String { format!("{}{}", self, rhs) } }
+        impl SolarAdd<i64> for &str { type Output = String; fn solar_add(&self, rhs: &i64) -> String { format!("{}{}", self, rhs) } }
+        impl SolarAdd<f32> for &str { type Output = String; fn solar_add(&self, rhs: &f32) -> String { format!("{}{}", self, rhs) } }
+        impl SolarAdd<f64> for &str { type Output = String; fn solar_add(&self, rhs: &f64) -> String { format!("{}{}", self, rhs) } }
+
+        impl SolarAdd<i32> for String { type Output = String; fn solar_add(&self, rhs: &i32) -> String { format!("{}{}", self, rhs) } }
+        impl SolarAdd<i64> for String { type Output = String; fn solar_add(&self, rhs: &i64) -> String { format!("{}{}", self, rhs) } }
+        impl SolarAdd<f32> for String { type Output = String; fn solar_add(&self, rhs: &f32) -> String { format!("{}{}", self, rhs) } }
+        impl SolarAdd<f64> for String { type Output = String; fn solar_add(&self, rhs: &f64) -> String { format!("{}{}", self, rhs) } }
+
+        pub trait SolarSub<Rhs = Self> {
+            type Output;
+            fn solar_sub(&self, rhs: &Rhs) -> Self::Output;
+        }
+        impl SolarSub for i32 { type Output = i32; fn solar_sub(&self, rhs: &i32) -> i32 { *self - *rhs } }
+        impl SolarSub for i64 { type Output = i64; fn solar_sub(&self, rhs: &i64) -> i64 { *self - *rhs } }
+        impl SolarSub for f32 { type Output = f32; fn solar_sub(&self, rhs: &f32) -> f32 { *self - *rhs } }
+        impl SolarSub for f64 { type Output = f64; fn solar_sub(&self, rhs: &f64) -> f64 { *self - *rhs } }
+
+        pub trait SolarMul<Rhs = Self> {
+            type Output;
+            fn solar_mul(&self, rhs: &Rhs) -> Self::Output;
+        }
+        impl SolarMul for i32 { type Output = i32; fn solar_mul(&self, rhs: &i32) -> i32 { *self * *rhs } }
+        impl SolarMul for i64 { type Output = i64; fn solar_mul(&self, rhs: &i64) -> i64 { *self * *rhs } }
+        impl SolarMul for f32 { type Output = f32; fn solar_mul(&self, rhs: &f32) -> f32 { *self * *rhs } }
+        impl SolarMul for f64 { type Output = f64; fn solar_mul(&self, rhs: &f64) -> f64 { *self * *rhs } }
+
+        pub trait SolarDiv<Rhs = Self> {
+            type Output;
+            fn solar_div(&self, rhs: &Rhs) -> Self::Output;
+        }
+        impl SolarDiv for i32 { type Output = i32; fn solar_div(&self, rhs: &i32) -> i32 { *self / *rhs } }
+        impl SolarDiv for i64 { type Output = i64; fn solar_div(&self, rhs: &i64) -> i64 { *self / *rhs } }
+        impl SolarDiv for f32 { type Output = f32; fn solar_div(&self, rhs: &f32) -> f32 { *self / *rhs } }
+        impl SolarDiv for f64 { type Output = f64; fn solar_div(&self, rhs: &f64) -> f64 { *self / *rhs } }
+
+        pub trait SolarLT<Rhs = Self> {
+            fn solar_lt(&self, rhs: &Rhs) -> bool;
+        }
+        impl SolarLT for i32 { fn solar_lt(&self, rhs: &i32) -> bool { *self < *rhs } }
+        impl SolarLT for i64 { fn solar_lt(&self, rhs: &i64) -> bool { *self < *rhs } }
+        impl SolarLT for f32 { fn solar_lt(&self, rhs: &f32) -> bool { *self < *rhs } }
+        impl SolarLT for f64 { fn solar_lt(&self, rhs: &f64) -> bool { *self < *rhs } }
+
+        pub trait SolarGT<Rhs = Self> {
+            fn solar_gt(&self, rhs: &Rhs) -> bool;
+        }
+        impl SolarGT for i32 { fn solar_gt(&self, rhs: &i32) -> bool { *self > *rhs } }
+        impl SolarGT for i64 { fn solar_gt(&self, rhs: &i64) -> bool { *self > *rhs } }
+        impl SolarGT for f32 { fn solar_gt(&self, rhs: &f32) -> bool { *self > *rhs } }
+        impl SolarGT for f64 { fn solar_gt(&self, rhs: &f64) -> bool { *self > *rhs } }
+
+        pub trait SolarEq<Rhs = Self> {
+            fn solar_eq(&self, rhs: &Rhs) -> bool;
+        }
+        impl SolarEq for i32 { fn solar_eq(&self, rhs: &i32) -> bool { *self == *rhs } }
+        impl SolarEq for i64 { fn solar_eq(&self, rhs: &i64) -> bool { *self == *rhs } }
+        impl SolarEq for f32 { fn solar_eq(&self, rhs: &f32) -> bool { *self == *rhs } }
+        impl SolarEq for f64 { fn solar_eq(&self, rhs: &f64) -> bool { *self == *rhs } }
+        impl SolarEq for bool { fn solar_eq(&self, rhs: &bool) -> bool { *self == *rhs } }
+        impl SolarEq for String { fn solar_eq(&self, rhs: &String) -> bool { self == rhs } }
+        impl SolarEq<&str> for &str { fn solar_eq(&self, rhs: &&str) -> bool { self == rhs } }
 
         pub trait SolarI32 {
             fn solar_to_string(&self) -> String;
         }
         impl SolarI32 for i32 {
+            fn solar_to_string(&self) -> String { self.to_string() }
+        }
+
+        pub trait SolarI64 {
+            fn solar_to_string(&self) -> String;
+        }
+        impl SolarI64 for i64 {
             fn solar_to_string(&self) -> String { self.to_string() }
         }
 
@@ -408,10 +591,46 @@ pub fn compile(program: Program) {
             fn solar_to_string(&self) -> String { self.to_string() }
         }
 
+        pub trait SolarF64 {
+            fn solar_to_string(&self) -> String;
+        }
+        impl SolarF64 for f64 {
+            fn solar_to_string(&self) -> String { self.to_string() }
+        }
+
+        pub trait SolarAsArg<'a> {
+            type Out;
+            fn as_arg(&'a self) -> Self::Out;
+        }
+        impl<'a, T: 'a> SolarAsArg<'a> for T {
+            type Out = &'a T;
+            fn as_arg(&'a self) -> &'a T { self }
+        }
+
+        pub trait SolarAsVal<T> {
+            fn as_val(&self) -> T;
+        }
+        impl<T: Clone> SolarAsVal<T> for T {
+            fn as_val(&self) -> T { self.clone() }
+        }
+        impl<'a, T: Clone> SolarAsVal<T> for &'a T {
+            fn as_val(&self) -> T { (*self).clone() }
+        }
+
+        pub trait SolarAsSize {
+            fn as_size(&self) -> usize;
+        }
+        impl SolarAsSize for i32 {
+            fn as_size(&self) -> usize { *self as usize }
+        }
+        impl<'a> SolarAsSize for &'a i32 {
+            fn as_size(&self) -> usize { **self as usize }
+        }
+
         pub mod mem {
-            pub fn free<T>(p: *mut T, size: i32) {
+            pub fn free<T>(p: &*mut T, size: &i32) {
                 unsafe {
-                    let _ = Vec::from_raw_parts(p, 0, size as usize);
+                    let _ = Vec::from_raw_parts(*p, 0, *size as usize);
                 }
             }
         }
@@ -420,54 +639,93 @@ pub fn compile(program: Program) {
             use std::io::{Read, Write};
             use std::fs::OpenOptions;
 
-            pub fn create(path: &str) -> std::fs::File {
-                std::fs::File::create(path).expect("Failed to create file")
+            pub fn create(path: impl AsRef<str>) -> std::fs::File {
+                std::fs::File::create(path.as_ref()).expect("Failed to create file")
             }
 
-            pub fn open(path: &str) -> std::fs::File {
-                std::fs::File::open(path).expect("Failed to open file")
+            pub fn open(path: impl AsRef<str>) -> std::fs::File {
+                std::fs::File::open(path.as_ref()).expect("Failed to open file")
             }
 
-            pub fn append(path: &str) -> std::fs::File {
-                OpenOptions::new().append(true).create(true).open(path).expect("Failed to open file for append")
+            pub fn append(path: impl AsRef<str>) -> std::fs::File {
+                OpenOptions::new().append(true).create(true).open(path.as_ref()).expect("Failed to open file for append")
             }
 
-            pub fn read(mut f: std::fs::File) -> String {
+            pub fn read(f: &mut std::fs::File) -> String {
                 let mut s = String::new();
                 f.read_to_string(&mut s).expect("Failed to read file");
                 s
             }
 
-            pub fn read_to_string(path: &str) -> String {
-                std::fs::read_to_string(path).expect("Failed to read file to string")
+            pub fn read_to_string(path: impl AsRef<str>) -> String {
+                std::fs::read_to_string(path.as_ref()).expect("Failed to read file to string")
             }
 
-            pub fn write(mut f: std::fs::File, content: &str) {
-                f.write_all(content.as_bytes()).expect("Failed to write file");
+            pub fn write(f: &mut std::fs::File, content: impl AsRef<str>) {
+                f.write_all(content.as_ref().as_bytes()).expect("Failed to write file");
             }
 
-            pub fn write_string(mut f: std::fs::File, content: String) {
+            pub fn write_string(f: &mut std::fs::File, content: String) {
                 f.write_all(content.as_bytes()).expect("Failed to write file");
             }
         }
-    });
+
+        pub mod sr_io {
+            use std::io::{self, Write};
+
+            pub fn readline() -> String {
+                let mut s = String::new();
+                io::stdin().read_line(&mut s).expect("Failed to read line");
+                s.trim().to_string()
+            }
+
+            pub fn write(content: impl AsRef<str>) {
+                io::stdout().write_all(content.as_ref().as_bytes()).expect("Failed to write to stdout");
+                io::stdout().flush().expect("Failed to flush stdout");
+            }
+
+            pub fn println(content: impl AsRef<str>) {
+                println!("{}", content.as_ref());
+            }
+
+            pub fn exit(code: i32) {
+                std::process::exit(code);
+            }
+
+            pub fn args() -> Vec < String > {
+                std::env::args().collect()
+            }
+        }
+
+            pub mod sr_math {
+            pub fn pi() -> f32 { std::f32::consts::PI }
+            pub fn e() -> f32 { std::f32::consts::E }
+            pub fn tau() -> f32 { std::f32::consts::TAU }
+            pub fn pi64() -> f64 { std::f64::consts::PI }
+            pub fn e64() -> f64 { std::f64::consts::E }
+            pub fn tau64() -> f64 { std::f64::consts::TAU }
+            }
+            });
+
 
     compile_decls(&program.declarations, &mut tokens);
 
     fs::write("output.rs", tokens.to_string()).expect("Failed to write Rust code");
-    
+
     // Create a temporary cargo project
     let project_dir = "solar_out";
     fs::create_dir_all(format!("{}/src", project_dir)).ok();
-    
-    let mut cargo_toml = String::from(r#"
+
+    let mut cargo_toml = String::from(
+        r#"
 [package]
 name = "solar_out"
 version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-"#);
+"#,
+    );
 
     if use_tokio {
         cargo_toml.push_str("tokio = { version = \"1.0\", features = [\"full\"] }\n");
@@ -478,9 +736,11 @@ edition = "2021"
             cargo_toml.push_str(&format!("{} = \"{}\"\n", name, version));
         }
     }
-    
-    fs::write(format!("{}/Cargo.toml", project_dir), cargo_toml).expect("Failed to write Cargo.toml");
-    fs::write(format!("{}/src/main.rs", project_dir), tokens.to_string()).expect("Failed to write src/main.rs");
+
+    fs::write(format!("{}/Cargo.toml", project_dir), cargo_toml)
+        .expect("Failed to write Cargo.toml");
+    fs::write(format!("{}/src/main.rs", project_dir), tokens.to_string())
+        .expect("Failed to write src/main.rs");
 
     println!("Compiling via Cargo...");
     let status = Command::new("cargo")
@@ -490,8 +750,16 @@ edition = "2021"
         .expect("Failed to invoke cargo.");
 
     if status.success() {
-        let binary_name = if cfg!(windows) { "solar_out.exe" } else { "solar_out" };
-        fs::copy(format!("{}/target/debug/{}", project_dir, binary_name), "main_program").ok();
+        let binary_name = if cfg!(windows) {
+            "solar_out.exe"
+        } else {
+            "solar_out"
+        };
+        fs::copy(
+            format!("{}/target/debug/{}", project_dir, binary_name),
+            "main_program",
+        )
+        .ok();
     } else {
         eprintln!("Cargo compilation failed.");
     }
@@ -501,7 +769,78 @@ fn compile_decls(decls: &[Decl], tokens: &mut TokenStream) {
     for decl in decls {
         match decl {
             Decl::Function(func) => tokens.extend(compile_function(&func, None)),
-            Decl::ExternFunction(_) | Decl::ExternObject(_) | Decl::ExternEnum(_) | Decl::ExternImpl(_) | Decl::RustDependency(_, _) => {},
+            Decl::ExternFunction(func) => {
+                let name = quote::format_ident!("{}", func.name);
+                let params = func.params.iter().map(|p| {
+                    let p_name = quote::format_ident!("{}", p.name);
+                    if p.ty == Type::Str {
+                        quote! { #p_name: impl AsRef<str> }
+                    } else {
+                        let p_ty = compile_type(&p.ty);
+                        quote! { #p_name: &#p_ty }
+                    }
+                });
+                let ret_type = match &func.return_type {
+                    Some(ty) => {
+                        let t = compile_type(ty);
+                        quote!(-> #t)
+                    }
+                    None => quote!(),
+                };
+                let rust_path = func
+                    .rust_path
+                    .as_ref()
+                    .expect("Extern function must have a rust_path");
+                let call_path = compile_id(rust_path);
+                let args = func.params.iter().map(|p| {
+                    let p_name = quote::format_ident!("{}", p.name);
+                    if matches!(p.ty, Type::I32 | Type::I64 | Type::F32 | Type::F64 | Type::Bool) {
+                        quote!(*#p_name)
+                    } else {
+                        quote!(#p_name)
+                    }
+                });
+                tokens.extend(quote! {
+                    pub fn #name(#( #params ),*) #ret_type {
+                        #call_path(#( #args ),*)
+                    }
+                });
+            }
+            Decl::ExternObject(obj) => {
+                let name = quote::format_ident!("{}", obj.name);
+                let rust_path = obj
+                    .rust_path
+                    .as_ref()
+                    .expect("Extern object must have a rust_path");
+                let target_path = compile_id(rust_path);
+                let gens = if obj.generics.is_empty() {
+                    quote!()
+                } else {
+                    let gids = obj.generics.iter().map(|g| quote::format_ident!("{}", g));
+                    quote!(<#( #gids ),*>)
+                };
+                tokens.extend(quote! {
+                    pub type #name #gens = #target_path #gens;
+                });
+            }
+            Decl::ExternEnum(enm) => {
+                let name = quote::format_ident!("{}", enm.name);
+                let rust_path = enm
+                    .rust_path
+                    .as_ref()
+                    .expect("Extern enum must have a rust_path");
+                let target_path = compile_id(rust_path);
+                let gens = if enm.generics.is_empty() {
+                    quote!()
+                } else {
+                    let gids = enm.generics.iter().map(|g| quote::format_ident!("{}", g));
+                    quote!(<#( #gids ),*>)
+                };
+                tokens.extend(quote! {
+                    pub type #name #gens = #target_path #gens;
+                });
+            }
+            Decl::ExternImpl(_) | Decl::RustDependency(_, _) => {}
             Decl::RustBlock(code) => {
                 let comment = format!("// Injected Rust Block\n{}", code);
                 tokens.extend(quote!(#comment));
@@ -509,24 +848,26 @@ fn compile_decls(decls: &[Decl], tokens: &mut TokenStream) {
             Decl::Module(name, inner) => {
                 let mut inner_tokens = TokenStream::new();
                 compile_decls(inner, &mut inner_tokens);
-                
+
                 let mut mod_tokens = inner_tokens;
                 let mut parts: Vec<&str> = name.split("::").collect();
-                
+
                 if parts.get(0) == Some(&"std") {
                     parts.remove(0);
                 }
-                
+
                 for part in parts.into_iter().rev() {
                     let id = quote::format_ident!("{}", part);
-                    mod_tokens = quote! { pub mod #id { #mod_tokens } };
+                    mod_tokens = quote! { pub mod #id { use crate::{SolarStr, SolarString, SolarVec, SolarAdd, SolarSub, SolarMul, SolarDiv, SolarGT, SolarLT, SolarEq, SolarI32, SolarI64, SolarF32, SolarF64, SolarAsArg, SolarAsVal, SolarAsSize}; #mod_tokens } };
                 }
                 tokens.extend(mod_tokens);
             }
-            Decl::Use(_) => {}, 
+            Decl::Use(_) => {}
             Decl::Object(obj) => {
                 let name = quote::format_ident!("{}", obj.name);
-                let gens = if obj.generics.is_empty() { quote!() } else {
+                let gens = if obj.generics.is_empty() {
+                    quote!()
+                } else {
                     let gids = obj.generics.iter().map(|g| quote::format_ident!("{}", g));
                     quote!(<#( #gids: Clone ),*>)
                 };
@@ -535,32 +876,60 @@ fn compile_decls(decls: &[Decl], tokens: &mut TokenStream) {
                     let fty = compile_type(&f.ty);
                     quote! { pub #fname: #fty }
                 });
-                tokens.extend(quote! { #[derive(Clone, Debug)] pub struct #name #gens { #( #fields ),* } });
+                tokens.extend(
+                    quote! { #[derive(Clone, Debug)] pub struct #name #gens { #( #fields ),* } },
+                );
             }
             Decl::Enum(enm) => {
                 let name = quote::format_ident!("{}", enm.name);
-                let gens = if enm.generics.is_empty() { quote!() } else {
+                let gens = if enm.generics.is_empty() {
+                    quote!()
+                } else {
                     let gids = enm.generics.iter().map(|g| quote::format_ident!("{}", g));
                     quote!(<#( #gids: Clone ),*>)
                 };
                 let variants = enm.variants.iter().map(|v| {
                     let vname = quote::format_ident!("{}", v.name);
                     let vtypes = v.types.iter().map(compile_type);
-                    if v.types.is_empty() { quote! { #vname } }
-                    else { quote! { #vname(#( #vtypes ),*) } }
+                    if v.types.is_empty() {
+                        quote! { #vname }
+                    } else {
+                        quote! { #vname(#( #vtypes ),*) }
+                    }
                 });
                 tokens.extend(quote! { #[derive(Clone, Debug, PartialEq)] pub enum #name #gens { #( #variants ),* } });
             }
             Decl::Impl(imp) => {
                 let target = compile_id(&imp.target);
                 let gids = imp.generics.iter().map(|g| quote::format_ident!("{}", g));
-                let gparams = if imp.generics.is_empty() { quote!() } else { quote!(<#( #gids: Clone ),*>) };
-                let gtarget = if imp.generics.is_empty() { quote!() } else {
+                let gparams = if imp.generics.is_empty() {
+                    quote!()
+                } else {
+                    quote!(<#( #gids: Clone ),*>)
+                };
+                let gtarget = if imp.generics.is_empty() {
+                    quote!()
+                } else {
                     let gids2 = imp.generics.iter().map(|g| quote::format_ident!("{}", g));
                     quote!(<#( #gids2 ),*>)
                 };
-                let functions = imp.functions.iter().map(|f| compile_function(f, Some(&imp.target)));
+                let functions: Vec<TokenStream> = imp
+                    .functions
+                    .iter()
+                    .map(|f| compile_function(f, Some(&imp.target)))
+                    .collect();
                 tokens.extend(quote! { impl #gparams #target #gtarget { #( #functions )* } });
+
+                // Automatic Drop mapping
+                if imp.functions.iter().any(|f| f.name == "destroy") {
+                    tokens.extend(quote! {
+                        impl #gparams Drop for #target #gtarget {
+                            fn drop(&mut self) {
+                                self.destroy();
+                            }
+                        }
+                    });
+                }
             }
         }
     }

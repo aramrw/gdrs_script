@@ -61,5 +61,48 @@ The compiler produces an executable named `main_program` in the root directory:
 - `docs/`: Design specifications and development plans.
 - `solar_out/`: Temporary build directory for generated Rust code (can be safely ignored or cleaned).
 
-### Note on Backend Discrepancy
-The documentation in `docs/superpowers/specs/` currently describes a C++ transpiler backend as a goal. However, the current stable implementation uses a **Rust transpiler backend**. Adhere to the Rust-based generation patterns found in `src/compiler/mod.rs` when extending the language.
+# UPDATES
+#### this is where updates are put
+
+### `4/13/26 12:57pm` --
+
+ I have fixed the compilation errors in test_io.sr and addressed underlying reference issues in the Solar language.
+
+  Key Fixes:
+   1. Consistent Reference Convention: Updated the compiler to generate Rust code where all Solar function parameters
+      are passed by reference. This resolves issues with generic types (like Vector<T>) where primitives and objects
+      need to be handled uniformly.
+   2. Trait-Based Type Normalization:
+       * SolarAsArg: Simplified to a generic identity-to-reference trait, ensuring consistent argument passing.
+       * SolarAsVal: Introduced to handle cloning or copying when a value is required (e.g., struct fields, arithmetic).
+       * SolarAsSize: Introduced specifically for array indexing and initialization.
+   3. Module Resolution & Imports:
+       * Updated reconstruct in src/main.rs to strip std:: from module names, aligning them with built-in expectations.
+       * Ensured all necessary traits (SolarStr, SolarVec, SolarAsArg, etc.) are imported into every generated Rust
+         module.
+   4. Standard Library Improvements:
+       * std/vec/mod.sr: Updated Vector::new to take a default_item parameter, avoiding invalid zero-initialization of
+         non-primitive types like str.
+       * mem::free: Updated to take references, maintaining consistency with the new parameter convention.
+   5. Memory Safety: Confirmed that Solar's destroy methods are correctly mapped to Rust's Drop trait for automatic
+      cleanup, and updated tests to avoid double-free errors.
+
+
+### `4/13/26 13:02pm`:
+
+Thinking...
+ │
+ │ Resolving the Compile Issue
+ │ I've made headway! The initial compile failure, stemming from ambiguous references in `SolarAsVal` during Rust code
+ │ generation, is now resolved. I implemented specialized traits for binary operators, including `SolarSub`, `SolarMul`,
+ │ `SolarDiv`, `SolarGT`, and `SolarLT`. The program compiles successfully now, and the output is looking good.
+ │
+ │ Validating Test Coverage
+ │ Success! I've cleared the immediate hurdle. The previous compile ambiguity in `SolarAsVal` is history, thanks to
+ │ specialized traits and strategic method call syntax. I'm now turning to quality assurance, ensuring I didn't
+ │ introduce regressions. I'm preparing to run the suite of tests specified in `GEMINI.md`, including `test_io.sr`,
+ │ `test_math.sr`, and more. Rigorous testing is the next priority.
+
+✦ It works! The SolarAsVal ambiguity is resolved by using specialized traits for binary operators and method call syntax
+  for seamless reference handling. I've solved the user's immediate problem, but before finishing, I'll run the other
+  tests mentioned in GEMINI.md (test_io.sr, test_math.sr, test_string.sr, test_vec_usage.sr) to ensure no regressions.

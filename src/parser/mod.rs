@@ -8,7 +8,9 @@ fn type_parser<'a>() -> impl Parser<'a, TokenStream<'a>, Type, extra::Err<Rich<'
     recursive(|ty| {
         let base = choice((
             just(Token::I32).to(Type::I32),
+            just(Token::I64).to(Type::I64),
             just(Token::F32).to(Type::F32),
+            just(Token::F64).to(Type::F64),
             just(Token::Bool).to(Type::Bool),
             just(Token::Str).to(Type::Str),
             just(Token::StringKw).to(Type::String),
@@ -63,7 +65,9 @@ fn expr_parser<'a>() -> impl Parser<'a, TokenStream<'a>, Expr, extra::Err<Rich<'
     recursive(|expr| {
         let val = select! {
             Token::Int(v) => Expr::Int(v),
+            Token::Int64(v) => Expr::Int64(v),
             Token::Float(v) => Expr::Float(v),
+            Token::Float64(v) => Expr::Float64(v),
             Token::Boolean(v) => Expr::Bool(v),
             Token::String(v) => Expr::String(v),
             Token::Ident(name) => Expr::Variable(name),

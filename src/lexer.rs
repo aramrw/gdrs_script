@@ -3,9 +3,9 @@ pub enum Token {
     // Keywords
     Fn, Var, Mut, Const, Box, If, Else, Print, Obj, Impl, Enum, Match, While, Return, Extern, SelfKw, Use, ResultKw, ErrorKw, Rust, Async, Await, Dependency,
     // Types
-    I32, F32, Bool, Str, StringKw, File,
+    I32, I64, F32, F64, Bool, Str, StringKw, File,
     // Literals
-    Int(i32), Float(f32), Boolean(bool), String(String), Ident(String),
+    Int(i32), Int64(i64), Float(f32), Float64(f64), Boolean(bool), String(String), Ident(String),
     // Symbols
     Plus, Minus, Star, Div, Eq, DoubleEq, Colon, Arrow, Dot, Gt, Lt, QuestionMark,
     ParenOpen, ParenClose, BraceOpen, BraceClose, BracketOpen, BracketClose,
@@ -35,10 +35,18 @@ pub fn lex(source: &str) -> Vec<Token> {
             if indent > last_indent {
                 indents.push(indent);
                 tokens.push(Token::Indent);
-            } else {
+            } else if indent < last_indent {
                 while indent < *indents.last().unwrap() {
                     indents.pop();
                     tokens.push(Token::Dedent);
+                }
+                // If we dedented to a level that is still NOT our target indent,
+                // it's an error in most languages, but we can try to be helpful.
+                // Re-check last_indent.
+                let new_last = *indents.last().unwrap();
+                if indent > new_last {
+                    indents.push(indent);
+                    tokens.push(Token::Indent);
                 }
             }
         }
@@ -102,11 +110,48 @@ pub fn lex(source: &str) -> Vec<Token> {
                     let mut is_float = false;
                     while let Some(&nc) = chars.peek() {
                         if nc.is_ascii_digit() { s.push(chars.next().unwrap()); }
-                        else if nc == '.' { is_float = true; s.push(chars.next().unwrap()); }
+                        else if nc == '.' && !is_float { 
+                            is_float = true; 
+                            s.push(chars.next().unwrap()); 
+                        }
                         else { break; }
                     }
-                    if is_float { tokens.push(Token::Float(s.parse().unwrap())); }
-                    else { tokens.push(Token::Int(s.parse().unwrap())); }
+                    
+                    // Check for suffixes
+                    let mut suffix = String::new();
+                    while let Some(&nc) = chars.peek() {
+                        if nc.is_ascii_alphanumeric() { suffix.push(chars.next().unwrap()); }
+                        else { break; }
+                    }
+
+                    match suffix.as_str() {
+                        "f32" => tokens.push(Token::Float(s.parse().unwrap())),
+                        "f64" => tokens.push(Token::Float64(s.parse().unwrap())),
+                        "i64" => tokens.push(Token::Int64(s.parse().unwrap())),
+                        "i32" => tokens.push(Token::Int(s.parse().unwrap())),
+                        "" => {
+                            if is_float { tokens.push(Token::Float(s.parse().unwrap())); }
+                            else { 
+                                // Try i32 first, then i64
+                                if let Ok(val) = s.parse::<i32>() {
+                                    tokens.push(Token::Int(val));
+                                } else if let Ok(val) = s.parse::<i64>() {
+                                    tokens.push(Token::Int64(val));
+                                } else {
+                                    // Fallback to float if it's too huge for i64? 
+                                    // Or just panic/error. For now unwrap.
+                                    tokens.push(Token::Int(s.parse().unwrap()));
+                                }
+                            }
+                        }
+                        _ => {
+                            // If suffix is unknown, we might have eaten part of next identifier
+                            // This is a bit risky but we can try to backtrack or just assume it's wrong for now.
+                            // In this simple lexer, we'll just push what we have.
+                            if is_float { tokens.push(Token::Float(s.parse().unwrap())); }
+                            else { tokens.push(Token::Int(s.parse().unwrap())); }
+                        }
+                    }
                 }
                 _ if c.is_ascii_alphabetic() || c == '_' => {
                     let mut s = c.to_string();
@@ -139,7 +184,9 @@ pub fn lex(source: &str) -> Vec<Token> {
                         "result" => tokens.push(Token::ResultKw),
                         "error" => tokens.push(Token::ErrorKw),
                         "i32" => tokens.push(Token::I32),
+                        "i64" => tokens.push(Token::I64),
                         "f32" => tokens.push(Token::F32),
+                        "f64" => tokens.push(Token::F64),
                         "bool" => tokens.push(Token::Bool),
                         "str" => tokens.push(Token::Str),
                         "string" => tokens.push(Token::StringKw),
