@@ -11,6 +11,7 @@ fn type_parser<'a>() -> impl Parser<'a, TokenStream<'a>, Type, extra::Err<Rich<'
             just(Token::F32).to(Type::F32),
             just(Token::Bool).to(Type::Bool),
             just(Token::Str).to(Type::Str),
+            just(Token::File).to(Type::File),
             just(Token::SelfKw).to(Type::SelfType),
             select! { Token::Ident(name) => Type::Custom(name, Vec::new()) },
         ));
