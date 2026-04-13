@@ -1,48 +1,52 @@
 mod ast;
-mod parser;
 mod compiler;
+mod parser;
+mod sema;
+mod lexer;
 
 use chumsky::prelude::*;
-use std::env; 
-use std::fs;
-use parser::parser;
 use compiler::compile;
+use parser::parser;
+use sema::SemanticAnalyzer;
+use lexer::lex;
+use std::env;
+use std::fs;
+use std::time::Instant;
 
 fn main() {
     let args: Vec<String> = env::args().collect();
+    let instant = Instant::now();
 
-    // 2. Ensure the user passed a file
     if args.len() < 2 {
         eprintln!("Usage: cargo run <file.sr>");
         std::process::exit(1);
     }
     let file_path = &args[1];
-    if !file_path.ends_with(".sr") {
-        eprintln!("Error: Compiler only accepts files with the '.sr' extension.");
-        std::process::exit(1);
-    }
+    let source_code = fs::read_to_string(file_path).expect("Error reading file");
 
-    let source_code = match fs::read_to_string(file_path) {
-        Ok(code) => code,
-        Err(e) => {
-            eprintln!("Error reading file: {}", e);
-            std::process::exit(1);
-        }
-    };
-    println!("[read] {}", file_path);
+    // 1. Lexing (Text -> Tokens)
+    let tokens = lex(&source_code);
+    // println!("Tokens: {:?}", tokens);
 
+    // 2. Parsing (Tokens -> AST)
+    match parser().parse(&tokens).into_result() {
+        Ok(program) => {
+            // 3. Semantic Analysis
+            let mut sema = SemanticAnalyzer::new();
+            if let Err(e) = sema.analyze(&program) {
+                eprintln!("[semantic error]: {}", e);
+                std::process::exit(1);
+            }
 
-    // 5. Parse and compile
-    match parser().parse(source_code.as_str()).into_result() {
-        Ok(ast) => {
-            println!("[parsed]");
-            compile(ast);
+            // 4. Compile
+            compile(program);
+            println!("compiled in {}ms", instant.elapsed().as_millis())
         }
         Err(parse_errs) => {
             for err in parse_errs {
-                eprintln!("[parse error]: {}", err);
+                eprintln!("[parse error]: {:?}", err);
             }
+            std::process::exit(1);
         }
     }
-
 }
