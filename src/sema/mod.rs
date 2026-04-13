@@ -47,6 +47,11 @@ impl SemanticAnalyzer {
     }
 
     pub fn analyze(&mut self, program: &Program) -> Result<(), String> {
+        self.functions.insert("file_create".to_string(), (vec![Type::Str], Some(Type::File)));
+        self.functions.insert("file_open".to_string(), (vec![Type::Str], Some(Type::File)));
+        self.functions.insert("file_read".to_string(), (vec![Type::File], Some(Type::Str)));
+        self.functions.insert("file_write".to_string(), (vec![Type::File, Type::Str], None));
+
         for decl in &program.declarations {
             if let Decl::Object(obj) = decl {
                 let mut fields = HashMap::new();
