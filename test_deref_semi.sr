@@ -1,0 +1,5 @@
+fn main():
+    var mut x = 42
+    var mut x_ref = &mut x;
+    *x_ref = 100
+    return Ok(())

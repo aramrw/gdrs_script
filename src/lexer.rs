@@ -1,18 +1,92 @@
 #[derive(Clone, Debug, PartialEq)]
 pub enum Token {
     // Keywords
-    Fn, Var, Mut, Const, Box, If, Else, Print, Obj, Impl, Enum, Match, While, Return, Extern, SelfKw, Use, ResultKw, ErrorKw, Rust, Async, Await, Dependency,
+    Fn, Var, Mut, Const, Box, If, Else, Print, Log, LogLn, Obj, Impl, Enum, Match, While, Return, Extern, SelfKw, Use, ResultKw, ErrorKw, Rust, Async, Await, Dependency,
     // Types
     I32, I64, F32, F64, Bool, Str, StringKw, File,
     // Literals
     Int(i32), Int64(i64), Float(f32), Float64(f64), Boolean(bool), String(String), Ident(String),
     // Symbols
-    Plus, Minus, Star, Div, Eq, DoubleEq, Colon, Arrow, Dot, Gt, Lt, QuestionMark,
+    Plus, Minus, Star, Div, Eq, DoubleEq, Amp, Colon, Arrow, Dot, Gt, Lt, QuestionMark, Bang,
     ParenOpen, ParenClose, BraceOpen, BraceClose, BracketOpen, BracketClose,
     Comma, Semicolon, DoubleColon, FatArrow,
     // Significant Whitespace
     Indent, Dedent,
     Attribute(String),
+}
+
+impl Token {
+    pub fn to_string(&self) -> String {
+        match self {
+            Token::Fn => "fn".to_string(),
+            Token::Var => "var".to_string(),
+            Token::Mut => "mut".to_string(),
+            Token::Const => "const".to_string(),
+            Token::Box => "Box".to_string(),
+            Token::If => "if".to_string(),
+            Token::Else => "else".to_string(),
+            Token::Print => "print".to_string(),
+            Token::Log => "log".to_string(),
+            Token::LogLn => "logln".to_string(),
+            Token::Obj => "obj".to_string(),
+            Token::Impl => "impl".to_string(),
+            Token::Enum => "enum".to_string(),
+            Token::Match => "match".to_string(),
+            Token::While => "while".to_string(),
+            Token::Return => "return".to_string(),
+            Token::Extern => "extern".to_string(),
+            Token::SelfKw => "self".to_string(),
+            Token::Use => "use".to_string(),
+            Token::ResultKw => "Result".to_string(),
+            Token::ErrorKw => "Error".to_string(),
+            Token::Rust => "rust".to_string(),
+            Token::Async => "async".to_string(),
+            Token::Await => "await".to_string(),
+            Token::Dependency => "dependency".to_string(),
+            Token::I32 => "i32".to_string(),
+            Token::I64 => "i64".to_string(),
+            Token::F32 => "f32".to_string(),
+            Token::F64 => "f64".to_string(),
+            Token::Bool => "bool".to_string(),
+            Token::Str => "str".to_string(),
+            Token::StringKw => "String".to_string(),
+            Token::File => "File".to_string(),
+            Token::Int(i) => i.to_string(),
+            Token::Int64(i) => i.to_string(),
+            Token::Float(f) => f.to_string(),
+            Token::Float64(f) => f.to_string(),
+            Token::Boolean(b) => b.to_string(),
+            Token::String(s) => format!("\"{}\"", s),
+            Token::Ident(s) => s.clone(),
+            Token::Plus => "+".to_string(),
+            Token::Minus => "-".to_string(),
+            Token::Star => "*".to_string(),
+            Token::Div => "/".to_string(),
+            Token::Eq => "=".to_string(),
+            Token::DoubleEq => "==".to_string(),
+            Token::Amp => "&".to_string(),
+            Token::Colon => ":".to_string(),
+            Token::Arrow => "->".to_string(),
+            Token::Dot => ".".to_string(),
+            Token::Gt => ">".to_string(),
+            Token::Lt => "<".to_string(),
+            Token::QuestionMark => "?".to_string(),
+            Token::Bang => "!".to_string(),
+            Token::ParenOpen => "(".to_string(),
+            Token::ParenClose => ")".to_string(),
+            Token::BraceOpen => "{".to_string(),
+            Token::BraceClose => "}".to_string(),
+            Token::BracketOpen => "[".to_string(),
+            Token::BracketClose => "]".to_string(),
+            Token::Comma => ",".to_string(),
+            Token::Semicolon => ";".to_string(),
+            Token::DoubleColon => "::".to_string(),
+            Token::FatArrow => "=>".to_string(),
+            Token::Indent => "".to_string(),
+            Token::Dedent => "".to_string(),
+            Token::Attribute(s) => format!("#[{}]", s),
+        }
+    }
 }
 
 pub fn lex(source: &str) -> Vec<Token> {
@@ -84,12 +158,14 @@ pub fn lex(source: &str) -> Vec<Token> {
                 ',' => tokens.push(Token::Comma),
                 ';' => tokens.push(Token::Semicolon),
                 '+' => tokens.push(Token::Plus),
+                '&' => tokens.push(Token::Amp),
                 '*' => tokens.push(Token::Star),
                 '/' => tokens.push(Token::Div),
                 '>' => tokens.push(Token::Gt),
                 '<' => tokens.push(Token::Lt),
                 '.' => tokens.push(Token::Dot),
                 '?' => tokens.push(Token::QuestionMark),
+                '!' => tokens.push(Token::Bang),
                 '-' => {
                     if chars.peek() == Some(&'>') { chars.next(); tokens.push(Token::Arrow); }
                     else { tokens.push(Token::Minus); }
@@ -186,6 +262,8 @@ pub fn lex(source: &str) -> Vec<Token> {
                         "if" => tokens.push(Token::If),
                         "else" => tokens.push(Token::Else),
                         "print" => tokens.push(Token::Print),
+                        "log" => tokens.push(Token::Log),
+                        "logln" => tokens.push(Token::LogLn),
                         "obj" => tokens.push(Token::Obj),
                         "impl" => tokens.push(Token::Impl),
                         "enum" => tokens.push(Token::Enum),
@@ -215,6 +293,17 @@ pub fn lex(source: &str) -> Vec<Token> {
                     }
                 }
                 _ => {}
+            }
+        }
+        
+        // After processing the line, if we are not inside brackets and we added tokens on this line,
+        // add a semicolon to terminate statements unless the line ends with something that explicitly
+        // continues to the next line (like a colon).
+        if nest_level == 0 && !tokens.is_empty() {
+            let last = tokens.last().unwrap();
+            match last {
+                Token::Colon | Token::Comma | Token::Semicolon | Token::Indent | Token::Dedent | Token::ParenOpen | Token::BracketOpen | Token::BraceOpen => {},
+                _ => { tokens.push(Token::Semicolon); }
             }
         }
     }

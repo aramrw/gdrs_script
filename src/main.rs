@@ -16,7 +16,21 @@ use std::time::Instant;
 use std::collections::{HashSet, VecDeque};
 use std::path::{Path, PathBuf};
 
-fn resolve_module(current_dir: &Path, parts: &[String]) -> Option<PathBuf> {
+fn resolve_module(current_dir: &Path, std_path: Option<&Path>, parts: &[String]) -> Option<PathBuf> {
+    if let Some(std) = std_path {
+        if parts.first().map(|s| s.as_str()) == Some("std") {
+            let mut path = std.to_path_buf();
+            for part in &parts[1..] {
+                path.push(part);
+            }
+            let sr_path = path.with_extension("sr");
+            if sr_path.exists() { return Some(sr_path); }
+            let mod_sr_path = path.join("mod.sr");
+            if mod_sr_path.exists() { return Some(mod_sr_path); }
+            return None;
+        }
+    }
+
     let mut path = current_dir.to_path_buf();
     for part in parts {
         path.push(part);
@@ -53,6 +67,10 @@ fn main() {
     queue.push_back(root_path.clone());
     loaded.insert(root_path.clone());
 
+    let cwd = env::current_dir().unwrap();
+    let std_path = cwd.join("std");
+    let std_path = if std_path.exists() { Some(std_path) } else { None };
+
     while let Some(current_file) = queue.pop_front() {
         let source_code = fs::read_to_string(&current_file).expect("Error reading file");
         let tokens = lex(&source_code);
@@ -63,7 +81,7 @@ fn main() {
                 let mut deps = Vec::new();
                 for decl in &program.declarations {
                     if let Decl::Use(parts) = decl {
-                        if let Some(mod_path) = resolve_module(current_dir, parts) {
+                        if let Some(mod_path) = resolve_module(current_dir, std_path.as_deref(), parts) {
                             let abs_mod_path = fs::canonicalize(mod_path).unwrap();
                             deps.push((parts.join("::"), abs_mod_path.clone()));
                             if !loaded.contains(&abs_mod_path) {
@@ -119,11 +137,11 @@ fn main() {
     }
 
     let all_decls = reconstruct(&root_path, &processed, &mut HashSet::new());
-    let program = Program { declarations: all_decls };
+    let mut program = Program { declarations: all_decls };
 
     // 3. Semantic Analysis
     let mut sema = SemanticAnalyzer::new();
-    if let Err(e) = sema.analyze(&program) {
+    if let Err(e) = sema.analyze(&mut program) {
         eprintln!("[semantic error]: {}", e);
         std::process::exit(1);
     }

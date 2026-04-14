@@ -1,9 +1,11 @@
 #[derive(Debug, Clone, PartialEq)]
 pub enum Type {
+    Unit,
     I32, I64, F32, F64, Bool, Str, String, File,
     Array(Box<Type>, usize),
     BoxPtr(Box<Type>),
     RawPtr(Box<Type>, bool),
+    Ref(Box<Type>, bool),
     Generic(String),
     Custom(String, Vec<Type>),
     SelfType,
@@ -23,15 +25,19 @@ pub enum AllocKind {
 
 #[derive(Debug, Clone)]
 pub enum Expr {
+    Unit,
     Int(i32), Int64(i64), Float(f32), Float64(f64), Bool(bool), String(String),
     Variable(String),
     Binary(Box<Expr>, BinaryOp, Box<Expr>),
-    Call(String, Vec<Expr>),
-    MethodCall(Box<Expr>, String, Vec<Expr>),
-    StructLiteral { name: String, fields: Vec<(String, Expr)> },
+    Call(String, Vec<Expr>, Option<String>),
+    MacroCall(String, Vec<Expr>),
+    MethodCall(Box<Expr>, String, Vec<Expr>, Option<String>),
+    StructLiteral { name: String, fields: Vec<(String, Expr)>, resolved_name: Option<String> },
     MemberAccess(Box<Expr>, String),
     IndexAccess(Box<Expr>, Box<Expr>),
     Alloc(Box<Expr>, AllocKind),
+    Borrow(Box<Expr>, bool),
+    Deref(Box<Expr>),
     Unwrap(Box<Expr>),
     Await(Box<Expr>),
 }
@@ -40,7 +46,6 @@ pub enum Expr {
 pub enum Stmt {
     VarDecl { name: String, is_mutable: bool, ty: Option<Type>, value: Expr },
     Assign { target: Expr, value: Expr },
-    Print(Expr),
     If { condition: Expr, then_branch: Box<Stmt>, else_branch: Option<Box<Stmt>> },
     While { condition: Expr, body: Box<Stmt> },
     Block(Vec<Stmt>),

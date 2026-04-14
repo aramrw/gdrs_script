@@ -7,6 +7,7 @@ type TokenStream<'a> = &'a [Token];
 fn type_parser<'a>() -> impl Parser<'a, TokenStream<'a>, Type, extra::Err<Rich<'a, Token>>> + Clone {
     recursive(|ty| {
         let base = choice((
+            just(Token::ParenOpen).then(just(Token::ParenClose)).to(Type::Unit),
             just(Token::I32).to(Type::I32),
             just(Token::I64).to(Type::I64),
             just(Token::F32).to(Type::F32),
@@ -16,6 +17,9 @@ fn type_parser<'a>() -> impl Parser<'a, TokenStream<'a>, Type, extra::Err<Rich<'
             just(Token::StringKw).to(Type::String),
             just(Token::File).to(Type::File),
             just(Token::SelfKw).to(Type::SelfType),
+            just(Token::Box).ignore_then(
+                ty.clone().delimited_by(just(Token::Lt), just(Token::Gt))
+            ).map(|t| Type::BoxPtr(Box::new(t))),
             just(Token::ResultKw).ignore_then(
                 ty.clone()
                     .then_ignore(just(Token::Comma))
@@ -25,6 +29,11 @@ fn type_parser<'a>() -> impl Parser<'a, TokenStream<'a>, Type, extra::Err<Rich<'
             just(Token::ErrorKw).to(Type::Error),
             select! { Token::Ident(name) => Type::Custom(name, Vec::new()) },
         ));
+
+        let reference = just(Token::Amp)
+            .ignore_then(just(Token::Mut).or_not())
+            .then(ty.clone())
+            .map(|(mut_kw, inner)| Type::Ref(Box::new(inner), mut_kw.is_some()));
 
         let ptr = just(Token::Star)
             .ignore_then(choice((
@@ -57,39 +66,57 @@ fn type_parser<'a>() -> impl Parser<'a, TokenStream<'a>, Type, extra::Err<Rich<'
             .then(ty.separated_by(just(Token::Comma)).collect::<Vec<_>>().delimited_by(just(Token::Lt), just(Token::Gt)).or_not())
             .map(|(name, gens)| Type::Custom(name, gens.unwrap_or_default()));
 
-        choice((custom_with_generics, ptr, array, base))
+        choice((custom_with_generics, ptr, reference, array, base))
     })
 }
 
 fn expr_parser<'a>() -> impl Parser<'a, TokenStream<'a>, Expr, extra::Err<Rich<'a, Token>>> + Clone {
     recursive(|expr| {
-        let val = select! {
-            Token::Int(v) => Expr::Int(v),
-            Token::Int64(v) => Expr::Int64(v),
-            Token::Float(v) => Expr::Float(v),
-            Token::Float64(v) => Expr::Float64(v),
-            Token::Boolean(v) => Expr::Bool(v),
-            Token::String(v) => Expr::String(v),
-            Token::Ident(name) => Expr::Variable(name),
-            Token::SelfKw => Expr::Variable("self".to_string()),
-        };
+        let val = choice((
+            just(Token::ParenOpen).then(just(Token::ParenClose)).to(Expr::Unit),
+            select! { Token::Int(v) => Expr::Int(v) },
+            select! { Token::Int64(v) => Expr::Int64(v) },
+            select! { Token::Float(v) => Expr::Float(v) },
+            select! { Token::Float64(v) => Expr::Float64(v) },
+            select! { Token::Boolean(v) => Expr::Bool(v) },
+            select! { Token::String(v) => Expr::String(v) },
+            select! { Token::Ident(name) => name }
+                .then(just(Token::DoubleColon).ignore_then(select! { Token::Ident(name) => name }).repeated().collect::<Vec<_>>())
+                .map(|(first, rest)| {
+                    let mut full = first;
+                    for part in rest {
+                        full.push_str("::");
+                        full.push_str(&part);
+                    }
+                    Expr::Variable(full)
+                }),
+            just(Token::SelfKw).to(Expr::Variable("self".to_string())),
+        ));
 
-        let alloc = just(Token::Star)
+        let alloc_or_deref = just(Token::Star)
             .ignore_then(choice((
-                just(Token::Box).to(AllocKind::Box),
-                just(Token::Mut).to(AllocKind::RawMut),
-                just(Token::Const).to(AllocKind::RawConst),
-            )))
-            .then(expr.clone())
-            .map(|(kind, e)| Expr::Alloc(Box::new(e), kind));
+                just(Token::Box).to(AllocKind::Box).then(expr.clone()).map(|(_, e)| Expr::Alloc(Box::new(e), AllocKind::Box)),
+                just(Token::Mut).to(AllocKind::RawMut).then(expr.clone()).map(|(_, e)| Expr::Alloc(Box::new(e), AllocKind::RawMut)),
+                just(Token::Const).to(AllocKind::RawConst).then(expr.clone()).map(|(_, e)| Expr::Alloc(Box::new(e), AllocKind::RawConst)),
+                expr.clone().map(|e| Expr::Deref(Box::new(e))),
+            )));
 
         let array_init = expr.clone()
             .then_ignore(just(Token::Semicolon))
             .then(expr.clone())
             .delimited_by(just(Token::BracketOpen), just(Token::BracketClose))
-            .map(|(v, s)| Expr::Call("array_init".to_string(), vec![v, s]));
+            .map(|(v, s)| Expr::Call("array_init".to_string(), vec![v, s], None));
 
         let struct_literal = select! { Token::Ident(name) => name }
+            .then(just(Token::DoubleColon).ignore_then(select! { Token::Ident(name) => name }).repeated().collect::<Vec<_>>())
+            .map(|(first, rest)| {
+                let mut full = first;
+                for part in rest {
+                    full.push_str("::");
+                    full.push_str(&part);
+                }
+                full
+            })
             .or(just(Token::SelfKw).to("self".to_string()))
             .then(
                 select! { Token::Ident(name) => name }
@@ -99,7 +126,12 @@ fn expr_parser<'a>() -> impl Parser<'a, TokenStream<'a>, Expr, extra::Err<Rich<'
                     .collect::<Vec<_>>()
                     .delimited_by(just(Token::BraceOpen), just(Token::BraceClose))
             )
-            .map(|(name, fields)| Expr::StructLiteral { name, fields });
+            .map(|(name, fields)| Expr::StructLiteral { name, fields, resolved_name: None });
+
+        let borrow = just(Token::Amp)
+            .ignore_then(just(Token::Mut).or_not())
+            .then(expr.clone())
+            .map(|(mut_kw, e)| Expr::Borrow(Box::new(e), mut_kw.is_some()));
 
         let call = select! { Token::Ident(name) => name }
             .then(just(Token::DoubleColon).ignore_then(select! { Token::Ident(name) => name }).repeated().collect::<Vec<_>>())
@@ -111,10 +143,11 @@ fn expr_parser<'a>() -> impl Parser<'a, TokenStream<'a>, Expr, extra::Err<Rich<'
                 }
                 full
             })
+            .then(just(Token::Bang).or_not())
             .then(expr.clone().separated_by(just(Token::Comma)).collect::<Vec<_>>().delimited_by(just(Token::ParenOpen), just(Token::ParenClose)))
-            .map(|(name, args)| Expr::Call(name, args));
+            .map(|((name, bang), args)| if bang.is_some() { Expr::MacroCall(name, args) } else { Expr::Call(name, args, None) });
 
-        let term = choice((call, alloc, array_init, struct_literal, val, expr.clone().delimited_by(just(Token::ParenOpen), just(Token::ParenClose))));
+        let term = choice((call, borrow, alloc_or_deref, array_init, struct_literal, val, expr.clone().delimited_by(just(Token::ParenOpen), just(Token::ParenClose))));
 
         let suffix = choice((
             just(Token::Dot).ignore_then(select! { Token::Ident(name) => name })
@@ -130,7 +163,7 @@ fn expr_parser<'a>() -> impl Parser<'a, TokenStream<'a>, Expr, extra::Err<Rich<'
             if is_await { Expr::Await(Box::new(lhs)) }
             else if unwrap { Expr::Unwrap(Box::new(lhs)) }
             else if let Some(idx) = index { Expr::IndexAccess(Box::new(lhs), Box::new(idx)) }
-            else if let Some(arguments) = args { Expr::MethodCall(Box::new(lhs), name, arguments) }
+            else if let Some(arguments) = args { Expr::MethodCall(Box::new(lhs), name, arguments, None) }
             else { Expr::MemberAccess(Box::new(lhs), name) }
         });
 
@@ -192,11 +225,6 @@ pub fn parser<'a>() -> impl Parser<'a, TokenStream<'a>, Program, extra::Err<Rich
             .then_ignore(just(Token::Semicolon).or_not())
             .map(|(target, value)| Stmt::Assign { target, value });
 
-        let print_stmt = just(Token::Print)
-            .ignore_then(expr.clone().delimited_by(just(Token::ParenOpen), just(Token::ParenClose)))
-            .then_ignore(just(Token::Semicolon).or_not())
-            .map(Stmt::Print);
-
         let block = just(Token::Indent)
             .ignore_then(stmt.clone().repeated().collect())
             .then_ignore(just(Token::Dedent))
@@ -252,19 +280,27 @@ pub fn parser<'a>() -> impl Parser<'a, TokenStream<'a>, Program, extra::Err<Rich
 
         let expr_stmt = expr.clone().map(Stmt::ExprStmt).then_ignore(just(Token::Semicolon).or_not());
 
-        choice((ptr_decl, var_decl, assign, print_stmt, block, if_stmt, while_stmt, return_stmt, match_stmt, expr_stmt))
+        choice((ptr_decl, var_decl, assign, block, if_stmt, while_stmt, return_stmt, match_stmt, expr_stmt))
     });
 
     let generic_params = select! { Token::Ident(name) => name }.separated_by(just(Token::Comma)).collect::<Vec<_>>().delimited_by(just(Token::Lt), just(Token::Gt));
 
-    let param = just(Token::Mut).or_not()
-        .then(choice((select! { Token::Ident(name) => name }, just(Token::SelfKw).to("self".to_string()))))
-        .then(just(Token::Colon).ignore_then(ty.clone()).or_not())
-        .map(|((mut_kw, name), ty): ((Option<Token>, String), Option<Type>)| Param { 
-            name, 
-            ty: ty.unwrap_or(Type::SelfType), 
-            is_mutable: mut_kw.is_some() 
-        });
+    let param = choice((
+        just(Token::Amp).then(just(Token::Mut).or_not()).then(just(Token::SelfKw))
+            .map(|((_, mut_kw), _)| Param { 
+                name: "self".to_string(), 
+                ty: Type::Ref(Box::new(Type::SelfType), mut_kw.is_some()),
+                is_mutable: mut_kw.is_some() 
+            }),
+        just(Token::Mut).or_not()
+            .then(choice((select! { Token::Ident(name) => name }, just(Token::SelfKw).to("self".to_string()))))
+            .then(just(Token::Colon).ignore_then(ty.clone()).or_not())
+            .map(|((mut_kw, name), ty): ((Option<Token>, String), Option<Type>)| Param { 
+                name, 
+                ty: ty.unwrap_or(Type::SelfType), 
+                is_mutable: mut_kw.is_some() 
+            })
+    ));
 
     let rust_path = just(Token::Eq).ignore_then(select! { Token::String(s) => s });
 
@@ -346,7 +382,13 @@ pub fn parser<'a>() -> impl Parser<'a, TokenStream<'a>, Program, extra::Err<Rich
         .then(generic_params.clone().or_not().map(|g| g.unwrap_or_default()))
         .then_ignore(just(Token::Colon).or_not())
         .then(just(Token::Indent).ignore_then(func_parser.clone().repeated().collect()).then_ignore(just(Token::Dedent)))
-        .map(|(((_impl_gens, target), _target_gens), functions)| ImplDecl { target, generics: _impl_gens, functions });
+        .map(|(((_impl_gens, target), _target_gens), functions)| {
+            let mut gens = _impl_gens;
+            if gens.is_empty() {
+                gens = _target_gens;
+            }
+            ImplDecl { target, generics: gens, functions }
+        });
 
     let extern_impl_parser = just(Token::Extern).ignore_then(just(Token::Impl))
         .ignore_then(generic_params.clone().or_not().map(|g| g.unwrap_or_default()))
@@ -387,10 +429,16 @@ pub fn parser<'a>() -> impl Parser<'a, TokenStream<'a>, Program, extra::Err<Rich
         .then(choice((
             select! { Token::String(version) => version },
             just(Token::BraceOpen)
-                .ignore_then(any().and_is(just(Token::BraceClose).not()).repeated())
+                .ignore_then(any().filter(|t: &Token| t != &Token::BraceClose).repeated().collect::<Vec<_>>())
                 .then_ignore(just(Token::BraceClose))
-                .map(|_tokens| {
-                    "{ version = \"1.0\", features = [\"derive\"] }".to_string() 
+                .map(|tokens| {
+                    let mut s = String::from("{ ");
+                    for (i, t) in tokens.iter().enumerate() {
+                        if i > 0 { s.push(' '); }
+                        s.push_str(&t.to_string());
+                    }
+                    s.push_str(" }");
+                    s
                 })
         )))
         .then_ignore(just(Token::Semicolon).or_not())

@@ -1,0 +1,16 @@
+fn main():
+    var mut x = 42
+    var x_clone = x.clone()
+    //var x_mut_ref = &mut x
+
+    println!("Type of x: ", typeof!(x.clone()))
+
+    var mut x_ref = &mut x
+    println!("Type of x_ref: ", typeof!(x_ref.clone()))
+
+    *x_ref = 100
+    // dereferencing x_ref works!!!
+    println!("New value of x: " + *x_ref)
+    println!(typeof!(*x_ref))
+
+    return Ok(())

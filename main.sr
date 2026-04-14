@@ -1,13 +1,2 @@
-rust dependency "serde_json" = "1.0"
-extern fn serde_json::to_string(data)
-use test_mod
-
-obj Point:
-	x: f32
-	y: f32
-
 fn main():
-	var p = Point { x: 20.0, y: 40.0 }
-
-	// use to_string on point
-	
+	Ok(())

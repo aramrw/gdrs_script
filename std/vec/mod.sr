@@ -13,15 +13,15 @@ impl<T> Vector<T>:
         }
         v
 
-    fn push(mut self, item: T):
+    fn push(&mut self, item: T):
         if self.len < self.cap:
             self.buffer[self.len] = item.clone()
             self.len = self.len + 1
         else:
-            print("vector overflow")
+            println!("vector overflow")
 
-    fn get(self, index: i32) -> T:
+    fn get(&self, index: i32) -> T:
         return self.buffer[index].clone()
 
-    fn destroy(mut self):
+    fn destroy(&mut self):
         mem::free(self.buffer, self.cap)

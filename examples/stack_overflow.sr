@@ -1,0 +1,19 @@
+rust dependency "serde" = "1.0"
+rust dependency "serde_json" = "1.0"
+
+use std::option
+
+#[derive(serde::Serialize, serde::Deserialize)]
+obj Node<T>:
+	val: T
+	next: std::option::Option<Box<Node<T>>>
+
+impl Node<T>:
+	fn new(val: T) -> Self:
+		Self { val, next: std::option::Option::None }
+
+fn main() -> result<(), error>:
+	var node = Node::new("20")
+	var node_str = serde_json::to_string(node)?
+	println!(node_str)
+	return Ok(())

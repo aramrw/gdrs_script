@@ -1,9 +1,9 @@
-extern enum Option<T> = "std::option::Option":
+extern enum Option<T> = "rust::option::Option":
     Some(T)
     None
 
-extern enum Result<T, E> = "std::result::Result":
+extern enum Result<T, E> = "rust::result::Result":
     Ok(T)
     Err(E)
 
-extern obj Error = "std::io::Error"
+extern obj Error = "rust::io::Error"

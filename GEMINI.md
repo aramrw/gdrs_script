@@ -106,3 +106,24 @@ Thinking...
 ✦ It works! The SolarAsVal ambiguity is resolved by using specialized traits for binary operators and method call syntax
   for seamless reference handling. I've solved the user's immediate problem, but before finishing, I'll run the other
   tests mentioned in GEMINI.md (test_io.sr, test_math.sr, test_string.sr, test_vec_usage.sr) to ensure no regressions.
+
+### `4/13/26 14:16pm`
+
+man im hella tired:
+
+✦ I have successfully addressed the errors in main.sr and improved the Solar compiler to support general macro calls
+  while removing the specific output statements.
+
+  Key Changes
+   1. Removed Hardcoded Output Statements:
+       * Removed print, log, and logln from the AST, parser, semantic analyzer, and compiler.
+       * Ensured that the ! suffix is mandatory for using macros in Solar.
+   2. General Macro Support:
+       * Updated the parser to support name!(args) as a general macro call expression.
+       * Added Expr::MacroCall to the AST and semantic analyzer.
+       * Modified the compiler to transpile MacroCall to Rust macro calls (name!(...)).
+   3. Refined Macro Transpilation:
+       * Implemented specialized transpilation for println! and print! macros, ensuring they include the required format
+         strings in Rust.
+   4. Updated Tests and Programs:
+       * Updated main.sr and test_std_rand.sr to use the println! macro for consistent output.

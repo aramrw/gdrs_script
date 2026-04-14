@@ -1,0 +1,14 @@
+use std::random
+
+fn main():
+    var random_val = random::f32_val()
+    println!("Random float (0-1): " + random_val.to_string())
+
+    var random_range = random::range_f32(10.0, 20.0)
+    println!("Random range (10-20): " + random_range.to_string())
+
+    match random::bool_val():
+        true => println!("Tossed a coin: Heads!")
+        false => println!("Tossed a coin: Tails!")
+    
+    return Ok(())
