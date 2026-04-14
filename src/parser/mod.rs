@@ -16,6 +16,7 @@ fn type_parser<'a>() -> impl Parser<'a, TokenStream<'a>, Type, extra::Err<Rich<'
             just(Token::Str).to(Type::Str),
             just(Token::StringKw).to(Type::String),
             just(Token::File).to(Type::File),
+            just(Token::Any).to(Type::Any),
             just(Token::SelfKw).to(Type::SelfType),
             just(Token::Box).ignore_then(
                 ty.clone().delimited_by(just(Token::Lt), just(Token::Gt))
@@ -71,6 +72,7 @@ fn type_parser<'a>() -> impl Parser<'a, TokenStream<'a>, Type, extra::Err<Rich<'
 }
 
 fn expr_parser<'a>() -> impl Parser<'a, TokenStream<'a>, Expr, extra::Err<Rich<'a, Token>>> + Clone {
+    let ty = type_parser();
     recursive(|expr| {
         let val = choice((
             just(Token::ParenOpen).then(just(Token::ParenClose)).to(Expr::Unit),
@@ -152,15 +154,17 @@ fn expr_parser<'a>() -> impl Parser<'a, TokenStream<'a>, Expr, extra::Err<Rich<'
         let suffix = choice((
             just(Token::Dot).ignore_then(select! { Token::Ident(name) => name })
                 .then(expr.clone().separated_by(just(Token::Comma)).collect::<Vec<_>>().delimited_by(just(Token::ParenOpen), just(Token::ParenClose)).or_not())
-                .map(|(name, args)| (name, args, None, false, false)),
+                .map(|(name, args)| (name, args, None, false, false, None)),
             expr.clone().delimited_by(just(Token::BracketOpen), just(Token::BracketClose))
-                .map(|e| (String::new(), None, Some(e), false, false)),
-            just(Token::QuestionMark).to((String::new(), None, None, true, false)),
-            just(Token::Dot).ignore_then(just(Token::Await)).to((String::new(), None, None, false, true)),
+                .map(|e| (String::new(), None, Some(e), false, false, None)),
+            just(Token::QuestionMark).to((String::new(), None, None, true, false, None)),
+            just(Token::Dot).ignore_then(just(Token::Await)).to((String::new(), None, None, false, true, None)),
+            just(Token::As).ignore_then(ty.clone()).map(|t| (String::new(), None, None, false, false, Some(t))),
         ));
 
-        let atom = term.clone().foldl(suffix.repeated(), |lhs, (name, args, index, unwrap, is_await): (String, Option<Vec<Expr>>, Option<Expr>, bool, bool)| {
-            if is_await { Expr::Await(Box::new(lhs)) }
+        let atom = term.clone().foldl(suffix.repeated(), |lhs, (name, args, index, unwrap, is_await, cast): (String, Option<Vec<Expr>>, Option<Expr>, bool, bool, Option<Type>)| {
+            if let Some(ty) = cast { Expr::Cast(Box::new(lhs), ty) }
+            else if is_await { Expr::Await(Box::new(lhs)) }
             else if unwrap { Expr::Unwrap(Box::new(lhs)) }
             else if let Some(idx) = index { Expr::IndexAccess(Box::new(lhs), Box::new(idx)) }
             else if let Some(arguments) = args { Expr::MethodCall(Box::new(lhs), name, arguments, None) }

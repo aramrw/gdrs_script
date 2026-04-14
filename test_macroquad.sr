@@ -1,0 +1,36 @@
+rust dependency macroquad = "0.4"
+
+use crate::macroquad::prelude::Color
+use crate::macroquad::prelude
+use std::math
+
+async fn draw_celestial_body(x: f32, y: f32, radius: f32, c: Color) -> ():
+    prelude::draw_circle(x, y, radius, c)
+
+#[macroquad::main("Solar Macroquad")]
+async fn main():
+    var center_x = prelude::screen_width() / 2.0
+    var center_y = prelude::screen_height() / 2.0
+
+    while true:
+        prelude::clear_background(prelude::BLACK)
+
+        // Calculate time for continuous orbital movement
+        var time = prelude::get_time() as f32
+
+        // 1. The Sun (Static in the center)
+        draw_celestial_body(center_x, center_y, 40.0, prelude::YELLOW).await
+
+        // 2. The Earth (Orbiting the Sun)
+        var earth_x = center_x + math::cos(time) * 200.0
+        var earth_y = center_y + math::sin(time) * 200.0
+        draw_celestial_body(earth_x, earth_y, 15.0, prelude::BLUE).await
+
+        // 3. The Moon (Orbiting the Earth at a faster speed)
+        var moon_x = earth_x + math::cos(time * 4.0) * 40.0
+        var moon_y = earth_y + math::sin(time * 4.0) * 40.0
+        draw_celestial_body(moon_x, moon_y, 5.0, prelude::LIGHTGRAY).await
+
+        prelude::draw_text("Orbital Mechanics", 20.0, 30.0, 20.0, prelude::WHITE)
+
+        prelude::next_frame().await

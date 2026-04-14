@@ -127,3 +127,19 @@ man im hella tired:
          strings in Rust.
    4. Updated Tests and Programs:
        * Updated main.sr and test_std_rand.sr to use the println! macro for consistent output.
+
+### `4/14/26 12:45pm`
+
+✦ I have implemented an external crate "trust system" in the Solar compiler, enabling the use of any Rust library without manual `extern` declarations.
+
+  Key Improvements:
+   1. Phantom Type System:
+       * Modified the `SemanticAnalyzer` to treat `use crate::<crate_name>` as a registration of a "phantom type".
+       * Any variable access or function call prefixed with a phantom type (e.g., `prelude::WHITE`, `prelude::next_frame()`) is now treated as `Type::Any`, bypassing strict type checking.
+   2. Enhanced Lexer & Attribute Support:
+       * Updated the lexer to prevent automatic semicolon insertion after `Token::Attribute`, allowing `#[macroquad::main(...)]` to be used correctly before functions.
+       * Added `Token::Any` to the lexer's `to_string` mapping to fix non-exhaustive match errors.
+   3. Flexible Control Flow:
+       * Updated `if` and `while` statement analysis to use `types_equal` for condition checks. This allows `Type::Any` (returned by phantom function calls like `is_key_down`) to satisfy the requirement for a boolean condition.
+   4. Verified macroquad Integration:
+       * Successfully compiled and ran a `test_macroquad.sr` program that uses `macroquad` for graphics and input, demonstrating seamless integration with external Rust crates.

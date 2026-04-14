@@ -298,6 +298,11 @@ fn compile_expr(expr: &Expr, target_obj: Option<&String>) -> TokenStream {
             let i = compile_expr(index, target_obj);
             quote! { (unsafe { &*#l.add(crate::SolarAsSize::as_size(&#i)) }) }
         }
+        Expr::Cast(inner, ty) => {
+            let e = compile_expr(inner, target_obj);
+            let t = compile_type(ty);
+            quote! { (crate::SolarAsVal::as_val(&#e) as #t) }
+        }
         Expr::StructLiteral {
             name,
             fields,
@@ -353,7 +358,7 @@ fn compile_expr(expr: &Expr, target_obj: Option<&String>) -> TokenStream {
     }
 }
 
-fn compile_stmt(stmt: &Stmt, is_last: bool, target_obj: Option<&String>) -> TokenStream {
+fn compile_stmt(stmt: &Stmt, is_last: bool, target_obj: Option<&String>, expected_ret: Option<&Type>) -> TokenStream {
     match stmt {
         Stmt::VarDecl {
             name,
@@ -387,13 +392,20 @@ fn compile_stmt(stmt: &Stmt, is_last: bool, target_obj: Option<&String>) -> Toke
         Stmt::Block(stmts) => {
             let mut inner = TokenStream::new();
             for (i, s) in stmts.iter().enumerate() {
-                inner.extend(compile_stmt(s, i == stmts.len() - 1, target_obj));
+                inner.extend(compile_stmt(s, i == stmts.len() - 1, target_obj, expected_ret));
             }
             quote! { { #inner } }
         }
         Stmt::ExprStmt(expr) => {
             let e = compile_expr(expr, target_obj);
-            if is_last { quote!(#e) } else { quote!(#e;) }
+            if is_last {
+                match expected_ret {
+                    Some(Type::Unit) | None => quote!(#e;),
+                    _ => quote!(#e),
+                }
+            } else {
+                quote!(#e;)
+            }
         }
         Stmt::If {
             condition,
@@ -401,9 +413,9 @@ fn compile_stmt(stmt: &Stmt, is_last: bool, target_obj: Option<&String>) -> Toke
             else_branch,
         } => {
             let cond = compile_expr(condition, target_obj);
-            let then = compile_stmt(then_branch, is_last, target_obj);
+            let then = compile_stmt(then_branch, is_last, target_obj, expected_ret);
             if let Some(else_b) = else_branch {
-                let els = compile_stmt(else_b, is_last, target_obj);
+                let els = compile_stmt(else_b, is_last, target_obj, expected_ret);
                 quote! { if #cond #then else #els }
             } else {
                 quote! { if #cond #then }
@@ -411,7 +423,7 @@ fn compile_stmt(stmt: &Stmt, is_last: bool, target_obj: Option<&String>) -> Toke
         }
         Stmt::While { condition, body } => {
             let cond = compile_expr(condition, target_obj);
-            let b = compile_stmt(body, false, target_obj);
+            let b = compile_stmt(body, false, target_obj, expected_ret);
             quote! { while #cond #b }
         }
         Stmt::Return(expr) => {
@@ -426,7 +438,7 @@ fn compile_stmt(stmt: &Stmt, is_last: bool, target_obj: Option<&String>) -> Toke
             let e = compile_expr(expr, target_obj);
             let arm_tokens = arms.iter().map(|arm| {
                 let pat = compile_pattern(&arm.pattern);
-                let body = compile_stmt(&arm.body, is_last, target_obj);
+                let body = compile_stmt(&arm.body, is_last, target_obj, expected_ret);
                 quote! { #pat => { #body } }
             });
             quote! { match #e { #( #arm_tokens ),* } }
@@ -447,7 +459,11 @@ fn compile_function(func: &Function, target_obj: Option<&String>) -> TokenStream
         quote! { #[#attr] }
     });
     let main_attr = if func.name == "main" && func.is_async {
-        quote!(#[tokio::main])
+        if func.attributes.is_empty() {
+            quote!(#[tokio::main])
+        } else {
+            quote!()
+        }
     } else {
         quote!()
     };
@@ -488,7 +504,7 @@ fn compile_function(func: &Function, target_obj: Option<&String>) -> TokenStream
                 }
             }
         } else if p.ty == Type::Str {
-            quote! { #p_name: impl AsRef<str> }
+            quote! { #p_name: &str }
         } else {
             let p_ty = compile_type(&p.ty);
             let mut_kw = if p.is_mutable { quote!(mut) } else { quote!() };
@@ -497,7 +513,8 @@ fn compile_function(func: &Function, target_obj: Option<&String>) -> TokenStream
             quote! { #mut_kw #p_name: #p_ty }
         }
     });
-    let ret_type = if func.name == "main" {
+    let is_macroquad = func.attributes.iter().any(|a| a.contains("macroquad::main"));
+    let ret_type = if func.name == "main" && !is_macroquad {
         quote!(-> Result<(), Box<dyn ::std::error::Error>>)
     } else {
         match &func.return_type {
@@ -508,7 +525,14 @@ fn compile_function(func: &Function, target_obj: Option<&String>) -> TokenStream
             None => quote!(),
         }
     };
-    let body = compile_stmt(&func.body, true, target_obj);
+    let unit_ty = Type::Unit;
+    let main_ret_ty = Type::Result(Box::new(Type::Unit), Box::new(Type::Error));
+
+    let body = if func.name == "main" && !is_macroquad {
+        compile_stmt(&func.body, true, target_obj, Some(&main_ret_ty))
+    } else {
+        compile_stmt(&func.body, true, target_obj, func.return_type.as_ref().or(Some(&unit_ty)))
+    };
     quote! { #main_attr #( #attrs )* pub #async_kw fn #name #gens (#( #params ),*) #ret_type #body }
 }
 
@@ -554,7 +578,7 @@ fn collect_metadata(
             Decl::RustDependency(name, version) => {
                 dependencies.push((name.clone(), version.clone()));
             }
-            Decl::Function(f) if f.name == "main" && f.is_async && prefix.is_empty() => {
+            Decl::Function(f) if f.name == "main" && f.is_async && f.attributes.is_empty() && prefix.is_empty() => {
                 *use_tokio = true;
             }
             Decl::Module(name, inner_decls) => {
@@ -1222,7 +1246,7 @@ fn compile_decls(decls: &[Decl], tokens: &mut TokenStream) {
 
                 for part in parts.into_iter().rev() {
                     let id = quote::format_ident!("{}", part);
-                    mod_tokens = quote! { pub mod #id { use std; use crate::{SolarStr, SolarString, SolarVec, SolarAdd, SolarSub, SolarMul, SolarDiv, SolarGT, SolarLT, SolarEq, SolarI32, SolarI64, SolarF32, SolarF64, SolarAsArg, SolarAsVal, SolarAsSize}; #mod_tokens } };
+                    mod_tokens = quote! { pub mod #id { use std; use crate::{SolarStr, SolarString, SolarVec, SolarAdd, SolarSub, SolarMul, SolarDiv, SolarGT, SolarLT, SolarEq, SolarI32, SolarI64, SolarF32, SolarF64, SolarAsArg, SolarAsVal, SolarAsSize, sr_math, sr_io, sr_fs}; #mod_tokens } };
                 }
                 tokens.extend(mod_tokens);
             }

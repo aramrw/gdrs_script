@@ -324,13 +324,15 @@ impl SemanticAnalyzer {
                 Ok(())
             }
             Stmt::If { condition, then_branch, else_branch } => {
-                if self.analyze_expr(condition)? != Type::Bool { return Err("If condition must be bool".to_string()); }
+                let cond_ty = self.analyze_expr(condition)?;
+                if !self.types_equal(&cond_ty, &Type::Bool) { return Err("If condition must be bool".to_string()); }
                 self.analyze_stmt(then_branch)?;
                 if let Some(eb) = else_branch { self.analyze_stmt(eb)?; }
                 Ok(())
             }
             Stmt::While { condition, body } => {
-                if self.analyze_expr(condition)? != Type::Bool { return Err("While condition must be bool".to_string()); }
+                let cond_ty = self.analyze_expr(condition)?;
+                if !self.types_equal(&cond_ty, &Type::Bool) { return Err("While condition must be bool".to_string()); }
                 self.analyze_stmt(body)?;
                 Ok(())
             }
@@ -380,7 +382,15 @@ impl SemanticAnalyzer {
             Expr::String(_) => Ok(Type::Str),
             Expr::Variable(name) => {
                 if let Some((ty, _)) = self.symbols.get(name) { Ok(ty.clone()) }
-                else { Err(format!("Undeclared variable '{}'", name)) }
+                else {
+                    if name.contains("::") {
+                        let parts: Vec<&str> = name.split("::").collect();
+                        if self.phantom_types.contains(parts[0]) {
+                            return Ok(Type::Any);
+                        }
+                    }
+                    Err(format!("Undeclared variable '{}'", name))
+                }
             }
             Expr::Binary(lhs, op, rhs) => {
                 let l = self.analyze_expr(lhs)?;
@@ -448,6 +458,7 @@ impl SemanticAnalyzer {
                         let parts: Vec<&str> = name.split("::").collect();
                         if self.phantom_types.contains(parts[0]) {
                             for arg in args { self.analyze_expr(arg)?; }
+                            *resolved_name = Some(name.clone());
                             return Ok(Type::Any);
                         }
                     }
@@ -585,6 +596,10 @@ impl SemanticAnalyzer {
             }
             Expr::Await(inner) => {
                 self.analyze_expr(inner)
+            }
+            Expr::Cast(inner, ty) => {
+                self.analyze_expr(inner)?;
+                Ok(self.resolve_type(ty))
             }
         }
     }

@@ -41,6 +41,7 @@ pub enum Expr {
     Deref(Box<Expr>),
     Unwrap(Box<Expr>),
     Await(Box<Expr>),
+    Cast(Box<Expr>, Type),
 }
 
 #[derive(Debug, Clone)]

@@ -1,32 +1,9 @@
-rust dependency winit = "0.30.5"
+rust dependency uuid = { version = "1.0", features = ["v4"]}
 
-use crate::winit::application::ApplicationHandler;
-use crate::winit::event::WindowEvent;
-use crate::winit::event_loop::{ActiveEventLoop, ControlFlow, EventLoop};
-use crate::winit::window::{Window, WindowId};
-use std::option;
-
-#[derive(Default)]
-obj App:
-    window: Option<Window>
-
-impl ApplicationHandler for App:
-    fn resumed(&mut self, event_loop: &ActiveEventLoop):
-        // Create the window when the application is resumed
-        var attrs = Window::default_attributes().with_title("Winit Window");
-        self.window = Some(event_loop.create_window(attrs).unwrap());
-
-    fn window_event(&mut self, event_loop: &ActiveEventLoop, _id: WindowId, event: WindowEvent):
-        match event:
-            WindowEvent::CloseRequested =>
-                println!("The close button was pressed; stopping");
-                event_loop.exit();
-            _ => (),
-        }
+use crate::uuid::Uuid;
 
 fn main():
-    var event_loop = EventLoop::new().unwrap();
-    event_loop.set_control_flow(ControlFlow::Wait);
-    var mut app = App::default();
-    event_loop.run_app(&mut app).unwrap();
-    Ok(())
+	var id = Uuid::new_v4();
+	println!(id);
+
+	Ok(())

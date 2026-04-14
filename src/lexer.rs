@@ -1,7 +1,7 @@
 #[derive(Clone, Debug, PartialEq)]
 pub enum Token {
     // Keywords
-    Fn, Var, Mut, Const, Box, If, Else, Print, Log, LogLn, Obj, Impl, Enum, Match, While, Return, Extern, SelfKw, Use, ResultKw, ErrorKw, Rust, Async, Await, Dependency,
+    Fn, Var, Mut, Const, Box, If, Else, Print, Log, LogLn, Obj, Impl, Enum, Match, While, Return, Extern, SelfKw, Use, ResultKw, ErrorKw, Rust, Async, Await, Dependency, Any, As,
     // Types
     I32, I64, F32, F64, Bool, Str, StringKw, File,
     // Literals
@@ -43,6 +43,8 @@ impl Token {
             Token::Async => "async".to_string(),
             Token::Await => "await".to_string(),
             Token::Dependency => "dependency".to_string(),
+            Token::Any => "any".to_string(),
+            Token::As => "as".to_string(),
             Token::I32 => "i32".to_string(),
             Token::I64 => "i64".to_string(),
             Token::F32 => "f32".to_string(),
@@ -273,12 +275,14 @@ pub fn lex(source: &str) -> Vec<Token> {
                         "extern" => tokens.push(Token::Extern),
                         "use" => tokens.push(Token::Use),
                         "rust" => tokens.push(Token::Rust),
+                        "as" => tokens.push(Token::As),
                         "async" => tokens.push(Token::Async),
                         "await" => tokens.push(Token::Await),
                         "dependency" => tokens.push(Token::Dependency),
                         "self" => tokens.push(Token::SelfKw),
                         "result" => tokens.push(Token::ResultKw),
                         "error" => tokens.push(Token::ErrorKw),
+                        "any" => tokens.push(Token::Any),
                         "i32" => tokens.push(Token::I32),
                         "i64" => tokens.push(Token::I64),
                         "f32" => tokens.push(Token::F32),
@@ -302,7 +306,7 @@ pub fn lex(source: &str) -> Vec<Token> {
         if nest_level == 0 && !tokens.is_empty() {
             let last = tokens.last().unwrap();
             match last {
-                Token::Colon | Token::Comma | Token::Semicolon | Token::Indent | Token::Dedent | Token::ParenOpen | Token::BracketOpen | Token::BraceOpen => {},
+                Token::Colon | Token::Comma | Token::Semicolon | Token::Indent | Token::Dedent | Token::ParenOpen | Token::BracketOpen | Token::BraceOpen | Token::Attribute(_) => {},
                 _ => { tokens.push(Token::Semicolon); }
             }
         }
