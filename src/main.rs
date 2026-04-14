@@ -173,6 +173,7 @@ fn main() {
     }
 
     // 4. Compile
-    compile(program);
+    let output_name = format!("sr_{}", root_path.file_stem().unwrap().to_str().unwrap());
+    compile(program, &output_name);
     println!("compiled in {}ms", instant.elapsed().as_millis())
 }

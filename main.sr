@@ -12,8 +12,14 @@ obj Triangle:
 async fn gameloop(t: Triangle):
     while true:
         prelude::clear_background(prelude::BLACK)
+        // draw v2 point
+        prelude::draw_circle(t.v2.x, t.v2.y, 15.0, prelude::GREEN)
+        // draw v3 point
+        prelude::draw_circle(t.v3.x, t.v3.y, 15.0, prelude::BLUE)
         // draw v1 point
-        prelude::draw_circle(t.v1.x, t.v1.y, 40.0, prelude::RED)
+        prelude::draw_circle(t.v1.x, t.v1.y, 15.0, prelude::RED)
+
+        // draw the triangle
         prelude::draw_triangle(t.v1, t.v2, t.v3, prelude::WHITE)
         prelude::next_frame().await
 
@@ -21,7 +27,7 @@ async fn gameloop(t: Triangle):
 async fn main():
     var t = Triangle { 
 		v1: prelude::vec2(200.0, 500.0),
-		v2: prelude::vec2(120.0, 30.0),
+		v2: prelude::vec2(300.0, 50.0),
 		v3: prelude::vec2(120.0, 90.0)
 	}
 	

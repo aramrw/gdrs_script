@@ -47,6 +47,7 @@ pub enum ExprKind {
     Alloc(Box<Expr>, AllocKind),
     Borrow(Box<Expr>, bool),
     Deref(Box<Expr>),
+    Negate(Box<Expr>),
     Unwrap(Box<Expr>),
     Await(Box<Expr>),
     Cast(Box<Expr>, Type),

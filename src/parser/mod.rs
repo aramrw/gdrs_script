@@ -144,6 +144,10 @@ where
             .then(expr.clone())
             .map_with(|(mut_kw, e), extr| Expr { kind: ExprKind::Borrow(Box::new(e), mut_kw.is_some()), span: extr.span() });
 
+        let negate = just(Token::Minus)
+            .ignore_then(expr.clone())
+            .map_with(|e, extr| Expr { kind: ExprKind::Negate(Box::new(e)), span: extr.span() });
+
         let call = select! { Token::Ident(name) => name }
             .then(just(Token::DoubleColon).ignore_then(select! { Token::Ident(name) => name }).repeated().collect::<Vec<_>>())
             .map(|(first, rest)| {
@@ -162,7 +166,7 @@ where
                 Expr { kind: ExprKind::Call(name, args, None), span: e.span() }
             });
 
-        let term = choice((struct_literal, call, borrow, alloc_or_deref, array_init, val, expr.clone().delimited_by(just(Token::ParenOpen), just(Token::ParenClose))));
+        let term = choice((struct_literal, call, borrow, negate, alloc_or_deref, array_init, val, expr.clone().delimited_by(just(Token::ParenOpen), just(Token::ParenClose))));
 
         let suffix = choice((
             just(Token::Dot).ignore_then(select! { Token::Ident(name) => name })

@@ -2,6 +2,7 @@
 name = "lang"
 version = "0.1.0"
 edition = "2024"
+default-run = "lang"
 
 [dependencies]
 chumsky = "0.12.0"

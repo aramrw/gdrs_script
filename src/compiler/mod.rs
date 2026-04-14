@@ -342,6 +342,10 @@ fn compile_expr(expr: &Expr, target_obj: Option<&String>) -> TokenStream {
                 quote! { &#e }
             }
         }
+        ExprKind::Negate(inner) => {
+            let e = compile_expr(inner, target_obj);
+            quote! { (-#e) }
+        }
         ExprKind::Deref(inner) => {
             let e = compile_expr(inner, target_obj);
             quote! { (*#e) }
@@ -528,7 +532,8 @@ fn compile_function(func: &Function, target_obj: Option<&String>) -> TokenStream
     let main_ret_ty = Type::Result(Box::new(Type::Unit), Box::new(Type::Error));
 
     let body = if func.name == "main" && !is_macroquad {
-        compile_stmt(&func.body, true, target_obj, Some(&main_ret_ty))
+        let b = compile_stmt(&func.body, true, target_obj, Some(&main_ret_ty));
+        quote! { { #b Ok(()) } }
     } else {
         compile_stmt(&func.body, true, target_obj, func.return_type.as_ref().or(Some(&unit_ty)))
     };
@@ -593,7 +598,7 @@ fn collect_metadata(
     }
 }
 
-pub fn compile(program: Program) {
+pub fn compile(program: Program, output_name: &str) {
     let mut tokens = TokenStream::new();
     let mut dependencies = Vec::new();
     let mut use_tokio = false;
@@ -1098,7 +1103,7 @@ edition = "2021"
     if status.success() {
         println!("Compilation successful!");
         let src_binary = format!("{}/target/debug/solar_out", project_dir);
-        let dst_binary = "main_program";
+        let dst_binary = output_name;
         if let Err(e) = fs::copy(&src_binary, dst_binary) {
             eprintln!("Failed to copy binary to {}: {}", dst_binary, e);
         }

@@ -612,6 +612,14 @@ impl SemanticAnalyzer {
                 let ty = self.analyze_expr(inner)?;
                 Ok(Type::Ref(Box::new(ty), *mutable))
             }
+            ExprKind::Negate(inner) => {
+                let ty = self.analyze_expr(inner)?;
+                if ty == Type::Any { return Ok(Type::Any); }
+                match ty {
+                    Type::I32 | Type::I64 | Type::F32 | Type::F64 => Ok(ty),
+                    _ => self.semantic_error(format!("Cannot negate type {:?}", ty), span),
+                }
+            }
             ExprKind::Deref(inner) => {
                 let ty = self.analyze_expr(inner)?;
                 match ty {
