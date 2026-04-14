@@ -5,6 +5,9 @@ mod sema;
 mod lexer;
 mod error;
 
+#[global_allocator]
+static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
+
 use chumsky::prelude::*;
 use compiler::compile;
 use parser::parser;

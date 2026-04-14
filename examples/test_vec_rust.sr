@@ -1,0 +1,9 @@
+# test if we can use Vec directly
+obj Vector<T>:
+    inner: Vec<T>
+
+fn main():
+    var v = Vector<i32> {
+        inner: Vec::new()
+    }
+    println!("success")

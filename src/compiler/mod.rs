@@ -651,6 +651,9 @@ pub fn compile(program: Program, output_name: &str) {
 
     tokens.extend(quote! {
         #![allow(unused)]
+        #[global_allocator]
+        static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
+
         use std::io::{Read, Write};
 
         pub trait SolarStr {
@@ -1125,6 +1128,7 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
+mimalloc = "0.1"
 "#,
     );
 
@@ -1152,8 +1156,27 @@ edition = "2021"
         }
     }
 
+    // Add profile optimizations for faster compilation
+    cargo_toml.push_str(
+        r#"
+[profile.dev]
+opt-level = 0
+debug = true
+split-debuginfo = "unpacked"
+incremental = true
+codegen-units = 256
+
+[profile.release]
+opt-level = 3
+lto = "thin"
+codegen-units = 1
+panic = "abort"
+"#,
+    );
+
     fs::write(format!("{}/Cargo.toml", project_dir), cargo_toml)
         .expect("Failed to write Cargo.toml");
+
     fs::write(format!("{}/src/main.rs", project_dir), tokens.to_string())
         .expect("Failed to write src/main.rs");
 

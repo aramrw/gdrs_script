@@ -1,4 +1,5 @@
-use std::math;
+use crate::std::vec::Vec;
 
 fn main():
-
+		var v: Vec<string> = Vec::with_capacity(0 as usize)
+		println!(typeof!(v))
