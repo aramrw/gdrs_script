@@ -82,13 +82,13 @@ where
     let ty = type_parser::<I>();
     recursive(|expr| {
         let val = choice((
-            just(Token::ParenOpen).then(just(Token::ParenClose)).to(Expr::Unit),
-            select! { Token::Int(v) => Expr::Int(v) },
-            select! { Token::Int64(v) => Expr::Int64(v) },
-            select! { Token::Float(v) => Expr::Float(v) },
-            select! { Token::Float64(v) => Expr::Float64(v) },
-            select! { Token::Boolean(v) => Expr::Bool(v) },
-            select! { Token::String(v) => Expr::String(v) },
+            just(Token::ParenOpen).then(just(Token::ParenClose)).to(ExprKind::Unit),
+            select! { Token::Int(v) => ExprKind::Int(v) },
+            select! { Token::Int64(v) => ExprKind::Int64(v) },
+            select! { Token::Float(v) => ExprKind::Float(v) },
+            select! { Token::Float64(v) => ExprKind::Float64(v) },
+            select! { Token::Boolean(v) => ExprKind::Bool(v) },
+            select! { Token::String(v) => ExprKind::String(v) },
             select! { Token::Ident(name) => name }
                 .then(just(Token::DoubleColon).ignore_then(select! { Token::Ident(name) => name }).repeated().collect::<Vec<_>>())
                 .map(|(first, rest)| {
@@ -97,24 +97,26 @@ where
                         full.push_str("::");
                         full.push_str(&part);
                     }
-                    Expr::Variable(full)
+                    ExprKind::Variable(full)
                 }),
-            just(Token::SelfKw).to(Expr::Variable("self".to_string())),
-        ));
+            just(Token::SelfKw).to(ExprKind::Variable("self".to_string())),
+        ))
+        .map_with(|kind, e| Expr { kind, span: e.span() });
 
         let alloc_or_deref = just(Token::Star)
             .ignore_then(choice((
-                just(Token::Box).to(AllocKind::Box).then(expr.clone()).map(|(_, e)| Expr::Alloc(Box::new(e), AllocKind::Box)),
-                just(Token::Mut).to(AllocKind::RawMut).then(expr.clone()).map(|(_, e)| Expr::Alloc(Box::new(e), AllocKind::RawMut)),
-                just(Token::Const).to(AllocKind::RawConst).then(expr.clone()).map(|(_, e)| Expr::Alloc(Box::new(e), AllocKind::RawConst)),
-                expr.clone().map(|e| Expr::Deref(Box::new(e))),
-            )));
+                just(Token::Box).to(AllocKind::Box).then(expr.clone()).map(|(_, e)| ExprKind::Alloc(Box::new(e), AllocKind::Box)),
+                just(Token::Mut).to(AllocKind::RawMut).then(expr.clone()).map(|(_, e)| ExprKind::Alloc(Box::new(e), AllocKind::RawMut)),
+                just(Token::Const).to(AllocKind::RawConst).then(expr.clone()).map(|(_, e)| ExprKind::Alloc(Box::new(e), AllocKind::RawConst)),
+                expr.clone().map(|e| ExprKind::Deref(Box::new(e))),
+            )))
+            .map_with(|kind, e| Expr { kind, span: e.span() });
 
         let array_init = expr.clone()
             .then_ignore(just(Token::Semicolon))
             .then(expr.clone())
             .delimited_by(just(Token::BracketOpen), just(Token::BracketClose))
-            .map(|(v, s)| Expr::Call("array_init".to_string(), vec![v, s], None));
+            .map_with(|(v, s), e| Expr { kind: ExprKind::Call("array_init".to_string(), vec![v, s], None), span: e.span() });
 
         let struct_literal = select! { Token::Ident(name) => name }
             .then(just(Token::DoubleColon).ignore_then(select! { Token::Ident(name) => name }).repeated().collect::<Vec<_>>())
@@ -130,17 +132,17 @@ where
             .then(
                 select! { Token::Ident(name) => name }
                     .then(just(Token::Colon).ignore_then(expr.clone()).or_not())
-                    .map(|(name, val)| (name.clone(), val.unwrap_or(Expr::Variable(name))))
+                    .map_with(|(name, val), e| (name.clone(), val.unwrap_or(Expr { kind: ExprKind::Variable(name), span: e.span() })))
                     .separated_by(just(Token::Comma))
                     .collect::<Vec<_>>()
                     .delimited_by(just(Token::BraceOpen), just(Token::BraceClose))
             )
-            .map(|(name, fields)| Expr::StructLiteral { name, fields, resolved_name: None });
+            .map_with(|(name, fields), e| Expr { kind: ExprKind::StructLiteral { name, fields, resolved_name: None }, span: e.span() });
 
         let borrow = just(Token::Amp)
             .ignore_then(just(Token::Mut).or_not())
             .then(expr.clone())
-            .map(|(mut_kw, e)| Expr::Borrow(Box::new(e), mut_kw.is_some()));
+            .map_with(|(mut_kw, e), extr| Expr { kind: ExprKind::Borrow(Box::new(e), mut_kw.is_some()), span: extr.span() });
 
         let call = select! { Token::Ident(name) => name }
             .then(just(Token::DoubleColon).ignore_then(select! { Token::Ident(name) => name }).repeated().collect::<Vec<_>>())
@@ -154,7 +156,11 @@ where
             })
             .then(just(Token::Bang).or_not())
             .then(expr.clone().separated_by(just(Token::Comma)).collect::<Vec<_>>().delimited_by(just(Token::ParenOpen), just(Token::ParenClose)))
-            .map(|((name, bang), args)| if bang.is_some() { Expr::MacroCall(name, args) } else { Expr::Call(name, args, None) });
+            .map_with(|((name, bang), args), e| if bang.is_some() { 
+                Expr { kind: ExprKind::MacroCall(name, args), span: e.span() }
+            } else { 
+                Expr { kind: ExprKind::Call(name, args, None), span: e.span() }
+            });
 
         let term = choice((struct_literal, call, borrow, alloc_or_deref, array_init, val, expr.clone().delimited_by(just(Token::ParenOpen), just(Token::ParenClose))));
 
@@ -170,12 +176,13 @@ where
         ));
 
         let atom = term.clone().foldl(suffix.repeated(), |lhs, (name, args, index, unwrap, is_await, cast): (String, Option<Vec<Expr>>, Option<Expr>, bool, bool, Option<Type>)| {
-            if let Some(ty) = cast { Expr::Cast(Box::new(lhs), ty) }
-            else if is_await { Expr::Await(Box::new(lhs)) }
-            else if unwrap { Expr::Unwrap(Box::new(lhs)) }
-            else if let Some(idx) = index { Expr::IndexAccess(Box::new(lhs), Box::new(idx)) }
-            else if let Some(arguments) = args { Expr::MethodCall(Box::new(lhs), name, arguments, None) }
-            else { Expr::MemberAccess(Box::new(lhs), name) }
+            let span = lhs.span; // Heuristic, might need better span merging
+            if let Some(ty) = cast { Expr { kind: ExprKind::Cast(Box::new(lhs), ty), span } }
+            else if is_await { Expr { kind: ExprKind::Await(Box::new(lhs)), span } }
+            else if unwrap { Expr { kind: ExprKind::Unwrap(Box::new(lhs)), span } }
+            else if let Some(idx) = index { Expr { kind: ExprKind::IndexAccess(Box::new(lhs), Box::new(idx)), span } }
+            else if let Some(arguments) = args { Expr { kind: ExprKind::MethodCall(Box::new(lhs), name, arguments, None), span } }
+            else { Expr { kind: ExprKind::MemberAccess(Box::new(lhs), name), span } }
         });
 
         let mul_op = just(Token::Star).to(BinaryOp::Multiply).or(just(Token::Div).to(BinaryOp::Divide));
@@ -183,15 +190,18 @@ where
         let cmp_op = just(Token::Gt).to(BinaryOp::GreaterThan).or(just(Token::Lt).to(BinaryOp::LessThan)).or(just(Token::DoubleEq).to(BinaryOp::Equal));
 
         let product = atom.clone().foldl(mul_op.then(atom).repeated(), |lhs, (op, rhs)| {
-            Expr::Binary(Box::new(lhs), op, Box::new(rhs))
+            let span = lhs.span;
+            Expr { kind: ExprKind::Binary(Box::new(lhs), op, Box::new(rhs)), span }
         });
 
         let sum = product.clone().foldl(add_op.then(product).repeated(), |lhs, (op, rhs)| {
-            Expr::Binary(Box::new(lhs), op, Box::new(rhs))
+            let span = lhs.span;
+            Expr { kind: ExprKind::Binary(Box::new(lhs), op, Box::new(rhs)), span }
         });
 
         sum.clone().foldl(cmp_op.then(sum).repeated(), |lhs, (op, rhs)| {
-            Expr::Binary(Box::new(lhs), op, Box::new(rhs))
+            let span = lhs.span;
+            Expr { kind: ExprKind::Binary(Box::new(lhs), op, Box::new(rhs)), span }
         })
     })
 }
@@ -211,8 +221,9 @@ where
             .then_ignore(just(Token::Eq))
             .then(expr.clone())
             .then_ignore(just(Token::Semicolon).or_not())
-            .map(|(((mut_kw, name), ty), value): (((Option<Token>, String), Option<Type>), Expr)| Stmt::VarDecl {
-                name, is_mutable: mut_kw.is_some(), ty, value
+            .map_with(|(((mut_kw, name), ty), value): (((Option<Token>, String), Option<Type>), Expr), e| Stmt {
+                kind: StmtKind::VarDecl { name, is_mutable: mut_kw.is_some(), ty, value },
+                span: e.span()
             });
 
         let ptr_decl = just(Token::Star)
@@ -225,36 +236,42 @@ where
             .then_ignore(just(Token::Eq).or(just(Token::Colon)))
             .then(expr.clone())
             .then_ignore(just(Token::Semicolon).or_not())
-            .map(|((kind, name), value)| Stmt::VarDecl {
-                name, 
-                is_mutable: match kind { AllocKind::RawMut | AllocKind::Box => true, _ => false },
-                ty: None, 
-                value: Expr::Alloc(Box::new(value), kind)
+            .map_with(|((kind, name), value), e| Stmt {
+                kind: StmtKind::VarDecl {
+                    name, 
+                    is_mutable: match kind { AllocKind::RawMut | AllocKind::Box => true, _ => false },
+                    ty: None, 
+                    value: Expr { kind: ExprKind::Alloc(Box::new(value), kind), span: e.span() }
+                },
+                span: e.span()
             });
 
         let assign = expr.clone()
             .then_ignore(just(Token::Eq))
             .then(expr.clone())
             .then_ignore(just(Token::Semicolon).or_not())
-            .map(|(target, value)| Stmt::Assign { target, value });
+            .map_with(|(target, value), e| Stmt { kind: StmtKind::Assign { target, value }, span: e.span() });
 
         let block = just(Token::Indent)
             .ignore_then(stmt.clone().repeated().collect())
             .then_ignore(just(Token::Dedent))
-            .map(Stmt::Block);
+            .map_with(|stmts, e| Stmt { kind: StmtKind::Block(stmts), span: e.span() });
 
         let if_stmt = just(Token::If).ignore_then(expr.clone()).then_ignore(just(Token::Colon)).then(block.clone())
             .then(just(Token::Else).ignore_then(just(Token::Colon).or_not()).ignore_then(block.clone()).or_not())
-            .map(|((condition, then_branch), else_branch): ((Expr, Stmt), Option<Stmt>)| Stmt::If {
-                condition, then_branch: Box::new(then_branch), else_branch: else_branch.map(Box::new),
+            .map_with(|((condition, then_branch), else_branch): ((Expr, Stmt), Option<Stmt>), e| Stmt {
+                kind: StmtKind::If {
+                    condition, then_branch: Box::new(then_branch), else_branch: else_branch.map(Box::new),
+                },
+                span: e.span()
             });
 
         let while_stmt = just(Token::While).ignore_then(expr.clone()).then_ignore(just(Token::Colon)).then(block.clone())
-            .map(|(condition, body)| Stmt::While { condition, body: Box::new(body) });
+            .map_with(|(condition, body), e| Stmt { kind: StmtKind::While { condition, body: Box::new(body) }, span: e.span() });
 
         let return_stmt = just(Token::Return).ignore_then(expr.clone().or_not())
             .then_ignore(just(Token::Semicolon).or_not())
-            .map(Stmt::Return);
+            .map_with(|val, e| Stmt { kind: StmtKind::Return(val), span: e.span() });
 
         let match_stmt = just(Token::Match).ignore_then(expr.clone())
             .then_ignore(just(Token::Colon).or_not())
@@ -289,9 +306,11 @@ where
                     )
                     .then_ignore(just(Token::Dedent))
             )
-            .map(|(expr, arms)| Stmt::Match { expr, arms });
+            .map_with(|(expr, arms), e| Stmt { kind: StmtKind::Match { expr, arms }, span: e.span() });
 
-        let expr_stmt = expr.clone().map(Stmt::ExprStmt).then_ignore(just(Token::Semicolon).or_not());
+        let expr_stmt = expr.clone()
+            .map_with(|e, extra| Stmt { kind: StmtKind::ExprStmt(e), span: extra.span() })
+            .then_ignore(just(Token::Semicolon).or_not());
 
         choice((ptr_decl, var_decl, assign, block, if_stmt, while_stmt, return_stmt, match_stmt, expr_stmt))
     });
@@ -340,14 +359,19 @@ where
     let func_parser = attribute_parser.clone()
         .then(func_sig.clone())
         .then_ignore(just(Token::Colon).or_not())
-        .then(just(Token::Indent).ignore_then(stmt.clone().repeated().collect()).then_ignore(just(Token::Dedent)).map(Stmt::Block))
+        .then(
+            just(Token::Indent)
+                .ignore_then(stmt.clone().repeated().collect())
+                .then_ignore(just(Token::Dedent))
+                .map_with(|stmts, e| Stmt { kind: StmtKind::Block(stmts), span: e.span() })
+        )
         .map(|((attributes, (((((is_async, name), generics), params), return_type), rust_path)), body)| Function { name, generics, params, return_type, body, is_async, rust_path, attributes });
 
     let extern_func_parser = attribute_parser.clone()
         .then(just(Token::Extern).ignore_then(func_sig.clone()))
-        .map(|(attributes, (((((is_async, name), generics), params), return_type), rust_path))| Function { 
+        .map_with(|(attributes, (((((is_async, name), generics), params), return_type), rust_path)), e| Function { 
             name, generics, params, return_type, is_async, rust_path, attributes,
-            body: Stmt::Block(Vec::new()) 
+            body: Stmt { kind: StmtKind::Block(Vec::new()), span: e.span() } 
         });
 
     let obj_inner = just(Token::Obj).ignore_then(select! { Token::Ident(name) => name })

@@ -166,7 +166,9 @@ fn main() {
     // 3. Semantic Analysis
     let mut sema = SemanticAnalyzer::new();
     if let Err(e) = sema.analyze(&mut program) {
-        eprintln!("[semantic error]: {}", e);
+        use miette::Report;
+        let report = Report::from(e);
+        eprintln!("{:?}", report);
         std::process::exit(1);
     }
 

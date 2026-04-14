@@ -1,3 +1,5 @@
+use crate::lexer::Span;
+
 #[derive(Debug, Clone, PartialEq)]
 pub enum Type {
     Unit,
@@ -25,7 +27,13 @@ pub enum AllocKind {
 }
 
 #[derive(Debug, Clone)]
-pub enum Expr {
+pub struct Expr {
+    pub kind: ExprKind,
+    pub span: Span,
+}
+
+#[derive(Debug, Clone)]
+pub enum ExprKind {
     Unit,
     Int(i32), Int64(i64), Float(f32), Float64(f64), Bool(bool), String(String),
     Variable(String),
@@ -45,7 +53,13 @@ pub enum Expr {
 }
 
 #[derive(Debug, Clone)]
-pub enum Stmt {
+pub struct Stmt {
+    pub kind: StmtKind,
+    pub span: Span,
+}
+
+#[derive(Debug, Clone)]
+pub enum StmtKind {
     VarDecl { name: String, is_mutable: bool, ty: Option<Type>, value: Expr },
     Assign { target: Expr, value: Expr },
     If { condition: Expr, then_branch: Box<Stmt>, else_branch: Option<Box<Stmt>> },

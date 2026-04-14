@@ -9,6 +9,14 @@ obj Triangle:
     v2: Vec2
     v3: Vec2
 
+async fn gameloop(t: Triangle):
+    while true:
+        prelude::clear_background(prelude::BLACK)
+        // draw v1 point
+        prelude::draw_circle(t.v1.x, t.v1.y, 40.0, prelude::RED)
+        prelude::draw_triangle(t.v1, t.v2, t.v3, prelude::WHITE)
+        prelude::next_frame().await
+
 #[macroquad::main("window")]
 async fn main():
     var t = Triangle { 
@@ -16,10 +24,6 @@ async fn main():
 		v2: prelude::vec2(120.0, 30.0),
 		v3: prelude::vec2(120.0, 90.0)
 	}
+	
+	gameloop(t).await
 
-    while true:
-        prelude::clear_background(prelude::BLACK)
-				// draw v1 point
-				prelude::draw_circle(v1.x, v1.y, 40.0, prelude::RED)
-        prelude::draw_triangle(t.v1, t.v2, t.v3, prelude::WHITE)
-        prelude::next_frame().await

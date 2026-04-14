@@ -207,22 +207,22 @@ fn compile_pattern(pat: &Pattern) -> TokenStream {
 }
 
 fn compile_expr(expr: &Expr, target_obj: Option<&String>) -> TokenStream {
-    match expr {
-        Expr::Unit => quote!(()),
-        Expr::Int(v) => quote!(#v),
-        Expr::Int64(v) => quote! { #v },
-        Expr::Float(v) => quote! { (#v as f32) },
-        Expr::Float64(v) => quote! { (#v as f64) },
-        Expr::Bool(v) => quote! { #v },
-        Expr::String(v) => quote! { #v },
-        Expr::Variable(n) => {
+    match &expr.kind {
+        ExprKind::Unit => quote!(()),
+        ExprKind::Int(v) => quote!(#v),
+        ExprKind::Int64(v) => quote! { #v },
+        ExprKind::Float(v) => quote! { (#v as f32) },
+        ExprKind::Float64(v) => quote! { (#v as f64) },
+        ExprKind::Bool(v) => quote! { #v },
+        ExprKind::String(v) => quote! { #v },
+        ExprKind::Variable(n) => {
             if n == "self" {
                 quote!(self)
             } else {
                 compile_id(n)
             }
         }
-        Expr::Binary(lhs, op, rhs) => {
+        ExprKind::Binary(lhs, op, rhs) => {
             let l = compile_expr(lhs, target_obj);
             let r = compile_expr(rhs, target_obj);
             match op {
@@ -237,7 +237,7 @@ fn compile_expr(expr: &Expr, target_obj: Option<&String>) -> TokenStream {
                 BinaryOp::Equal => quote! { (#l).solar_eq(&#r) },
             }
         }
-        Expr::MacroCall(name, args) => {
+        ExprKind::MacroCall(name, args) => {
             let name_id = compile_id(name);
             let args_compiled: Vec<_> = args.iter().map(|a| compile_expr(a, target_obj)).collect();
             if name == "println" || name == "print" {
@@ -250,7 +250,7 @@ fn compile_expr(expr: &Expr, target_obj: Option<&String>) -> TokenStream {
                 quote! { #name_id!(#( #args_compiled ),*) }
             }
         }
-        Expr::Call(name, args, resolved_name) => {
+        ExprKind::Call(name, args, resolved_name) => {
             if name == "Box" && args.len() == 1 {
                 let inner = compile_expr(&args[0], target_obj);
                 return quote! { Box::new(#inner) };
@@ -281,28 +281,28 @@ fn compile_expr(expr: &Expr, target_obj: Option<&String>) -> TokenStream {
             let args = args.iter().map(|a| compile_expr(a, target_obj));
             quote! { #id(#( #args ),*) }
         }
-        Expr::MethodCall(lhs, name, args, _resolved_obj_name) => {
+        ExprKind::MethodCall(lhs, name, args, _resolved_obj_name) => {
             let l = compile_expr(lhs, target_obj);
             let id = quote::format_ident!("{}", name);
             let args = args.iter().map(|a| compile_expr(a, target_obj));
             quote! { (#l).#id(#( #args ),*) }
         }
-        Expr::MemberAccess(lhs, name) => {
+        ExprKind::MemberAccess(lhs, name) => {
             let l = compile_expr(lhs, target_obj);
             let id = quote::format_ident!("{}", name);
             quote! { #l.#id }
         }
-        Expr::IndexAccess(lhs, index) => {
+        ExprKind::IndexAccess(lhs, index) => {
             let l = compile_expr(lhs, target_obj);
             let i = compile_expr(index, target_obj);
             quote! { (unsafe { &*#l.add(crate::SolarAsSize::as_size(&#i)) }) }
         }
-        Expr::Cast(inner, ty) => {
+        ExprKind::Cast(inner, ty) => {
             let e = compile_expr(inner, target_obj);
             let t = compile_type(ty);
             quote! { (crate::SolarAsVal::as_val(&#e) as #t) }
         }
-        Expr::StructLiteral {
+        ExprKind::StructLiteral {
             name,
             fields,
             resolved_name,
@@ -326,7 +326,7 @@ fn compile_expr(expr: &Expr, target_obj: Option<&String>) -> TokenStream {
             });
             quote! { #id { #( #fields ),* } }
         }
-        Expr::Alloc(inner, kind) => {
+        ExprKind::Alloc(inner, kind) => {
             let e = compile_expr(inner, target_obj);
             match kind {
                 AllocKind::Box => quote! { Box::new(#e) },
@@ -334,7 +334,7 @@ fn compile_expr(expr: &Expr, target_obj: Option<&String>) -> TokenStream {
                 AllocKind::RawConst => quote! { #e },
             }
         }
-        Expr::Borrow(inner, mutable) => {
+        ExprKind::Borrow(inner, mutable) => {
             let e = compile_expr(inner, target_obj);
             if *mutable {
                 quote! { &mut #e }
@@ -342,15 +342,15 @@ fn compile_expr(expr: &Expr, target_obj: Option<&String>) -> TokenStream {
                 quote! { &#e }
             }
         }
-        Expr::Deref(inner) => {
+        ExprKind::Deref(inner) => {
             let e = compile_expr(inner, target_obj);
             quote! { (*#e) }
         }
-        Expr::Unwrap(inner) => {
+        ExprKind::Unwrap(inner) => {
             let e = compile_expr(inner, target_obj);
             quote! { #e? }
         }
-        Expr::Await(inner) => {
+        ExprKind::Await(inner) => {
             let e = compile_expr(inner, target_obj);
             quote! { #e.await }
         }
@@ -358,8 +358,8 @@ fn compile_expr(expr: &Expr, target_obj: Option<&String>) -> TokenStream {
 }
 
 fn compile_stmt(stmt: &Stmt, is_last: bool, target_obj: Option<&String>, expected_ret: Option<&Type>) -> TokenStream {
-    match stmt {
-        Stmt::VarDecl {
+    match &stmt.kind {
+        StmtKind::VarDecl {
             name,
             is_mutable,
             ty,
@@ -377,9 +377,9 @@ fn compile_stmt(stmt: &Stmt, is_last: bool, target_obj: Option<&String>, expecte
             };
             quote! { let #mut_kw #id #ty_tokens = #val; }
         }
-        Stmt::Assign { target, value } => {
+        StmtKind::Assign { target, value } => {
             let v = compile_expr(value, target_obj);
-            if let Expr::IndexAccess(lhs, index) = target {
+            if let ExprKind::IndexAccess(lhs, index) = &target.kind {
                 let l = compile_expr(lhs, target_obj);
                 let i = compile_expr(index, target_obj);
                 quote! { unsafe { *#l.add(crate::SolarAsSize::as_size(&#i)) = crate::SolarAsVal::as_val(&#v); } }
@@ -388,14 +388,14 @@ fn compile_stmt(stmt: &Stmt, is_last: bool, target_obj: Option<&String>, expecte
                 quote! { #t = crate::SolarAsVal::as_val(&#v); }
             }
         }
-        Stmt::Block(stmts) => {
+        StmtKind::Block(stmts) => {
             let mut inner = TokenStream::new();
             for (i, s) in stmts.iter().enumerate() {
                 inner.extend(compile_stmt(s, i == stmts.len() - 1, target_obj, expected_ret));
             }
             quote! { { #inner } }
         }
-        Stmt::ExprStmt(expr) => {
+        StmtKind::ExprStmt(expr) => {
             let e = compile_expr(expr, target_obj);
             if is_last {
                 match expected_ret {
@@ -406,7 +406,7 @@ fn compile_stmt(stmt: &Stmt, is_last: bool, target_obj: Option<&String>, expecte
                 quote!(#e;)
             }
         }
-        Stmt::If {
+        StmtKind::If {
             condition,
             then_branch,
             else_branch,
@@ -420,12 +420,12 @@ fn compile_stmt(stmt: &Stmt, is_last: bool, target_obj: Option<&String>, expecte
                 quote! { if #cond #then }
             }
         }
-        Stmt::While { condition, body } => {
+        StmtKind::While { condition, body } => {
             let cond = compile_expr(condition, target_obj);
             let b = compile_stmt(body, false, target_obj, expected_ret);
             quote! { while #cond #b }
         }
-        Stmt::Return(expr) => {
+        StmtKind::Return(expr) => {
             let e = expr.as_ref().map(|e| compile_expr(e, target_obj));
             if let Some(tokens) = e {
                 quote! { return #tokens; }
@@ -433,7 +433,7 @@ fn compile_stmt(stmt: &Stmt, is_last: bool, target_obj: Option<&String>, expecte
                 quote! { return; }
             }
         }
-        Stmt::Match { expr, arms } => {
+        StmtKind::Match { expr, arms } => {
             let e = compile_expr(expr, target_obj);
             let arm_tokens = arms.iter().map(|arm| {
                 let pat = compile_pattern(&arm.pattern);

@@ -34,6 +34,14 @@ pub enum CompilerError {
         #[label("{message}")]
         span: SourceSpan,
     },
+
+    #[error("Semantic error: {message}")]
+    #[diagnostic(code(sema::error))]
+    Semantic {
+        message: String,
+        #[label("{message}")]
+        span: SourceSpan,
+    },
 }
 
 impl CompilerError {

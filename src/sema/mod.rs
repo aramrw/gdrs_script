@@ -1,4 +1,7 @@
 use crate::ast::*;
+use crate::error::CompilerError;
+use crate::lexer::Span;
+use miette::SourceSpan;
 use std::collections::{HashMap, HashSet};
 
 pub struct SemanticAnalyzer {
@@ -24,6 +27,11 @@ impl SemanticAnalyzer {
             current_obj: None,
             current_prefix: String::new(),
         }
+    }
+
+    fn semantic_error<T>(&self, message: String, span: Span) -> Result<T, CompilerError> {
+        let source_span = SourceSpan::new(span.start.into(), (span.end - span.start).into());
+        Err(CompilerError::Semantic { message, span: source_span })
     }
 
     fn types_equal(&self, a: &Type, b: &Type) -> bool {
@@ -83,7 +91,7 @@ impl SemanticAnalyzer {
         }
     }
 
-    pub fn analyze(&mut self, program: &mut Program) -> Result<(), String> {
+    pub fn analyze(&mut self, program: &mut Program) -> Result<(), CompilerError> {
         self.functions.insert("fs::create".to_string(), (vec![Type::Str], Some(Type::File)));
         self.functions.insert("fs::open".to_string(), (vec![Type::Str], Some(Type::File)));
         self.functions.insert("fs::append".to_string(), (vec![Type::Str], Some(Type::File)));
@@ -199,7 +207,7 @@ impl SemanticAnalyzer {
         Ok(())
     }
 
-    fn collect_decls(&mut self, decls: &[Decl], prefix: &str) -> Result<(), String> {
+    fn collect_decls(&mut self, decls: &[Decl], prefix: &str) -> Result<(), CompilerError> {
         for decl in decls {
             match decl {
                 Decl::Object(obj) | Decl::ExternObject(obj) => {
@@ -266,7 +274,7 @@ impl SemanticAnalyzer {
         Ok(())
     }
 
-    fn analyze_decls(&mut self, decls: &mut [Decl], prefix: &str) -> Result<(), String> {
+    fn analyze_decls(&mut self, decls: &mut [Decl], prefix: &str) -> Result<(), CompilerError> {
         let old_prefix = std::mem::replace(&mut self.current_prefix, prefix.to_string());
         for decl in decls {
             match decl {
@@ -297,7 +305,7 @@ impl SemanticAnalyzer {
         Ok(())
     }
 
-    fn analyze_function(&mut self, func: &mut Function, target: Option<&String>) -> Result<(), String> {
+    fn analyze_function(&mut self, func: &mut Function, target: Option<&String>) -> Result<(), CompilerError> {
         self.symbols.clear();
         self.current_obj = target.cloned();
         if let Some(t) = target { self.symbols.insert("self".to_string(), (Type::Custom(t.clone(), Vec::new()), false)); }
@@ -307,52 +315,61 @@ impl SemanticAnalyzer {
         Ok(())
     }
 
-    fn analyze_stmt(&mut self, stmt: &mut Stmt) -> Result<(), String> {
-        match stmt {
-            Stmt::VarDecl { name, is_mutable, ty, value, .. } => {
+    fn analyze_stmt(&mut self, stmt: &mut Stmt) -> Result<(), CompilerError> {
+        let span = stmt.span;
+        match &mut stmt.kind {
+            StmtKind::VarDecl { name, is_mutable, ty, value } => {
                 let val_ty = self.analyze_expr(value)?;
                 let expected_ty = ty.as_ref().map(|t| self.resolve_type(t));
                 let final_ty = if let Some(t) = expected_ty {
-                    if !self.types_equal(&val_ty, &t) { return Err(format!("Type mismatch for {}", name)); }
+                    if !self.types_equal(&val_ty, &t) { 
+                        return self.semantic_error(format!("Type mismatch for {}: expected {:?}, found {:?}", name, t, val_ty), span); 
+                    }
                     t
                 } else { val_ty };
                 self.symbols.insert(name.clone(), (final_ty, *is_mutable));
                 Ok(())
             }
-            Stmt::Assign { target, value } => {
+            StmtKind::Assign { target, value } => {
                 let _target_ty = self.analyze_expr(target)?;
                 let _val_ty = self.analyze_expr(value)?;
-                if let Expr::Variable(name) = target {
+                if let ExprKind::Variable(name) = &target.kind {
                     if let Some((_, mutable)) = self.symbols.get(name) {
-                        if !mutable { return Err(format!("Cannot assign to immutable variable '{}'", name)); }
+                        if !mutable { 
+                            return self.semantic_error(format!("Cannot assign to immutable variable '{}'", name), target.span); 
+                        }
                     }
                 }
                 Ok(())
             }
-            Stmt::If { condition, then_branch, else_branch } => {
+            StmtKind::If { condition, then_branch, else_branch } => {
                 let cond_ty = self.analyze_expr(condition)?;
-                if !self.types_equal(&cond_ty, &Type::Bool) { return Err("If condition must be bool".to_string()); }
+                if !self.types_equal(&cond_ty, &Type::Bool) { 
+                    return self.semantic_error(format!("If condition must be bool, found {:?}", cond_ty), condition.span); 
+                }
                 self.analyze_stmt(then_branch)?;
                 if let Some(eb) = else_branch { self.analyze_stmt(eb)?; }
                 Ok(())
             }
-            Stmt::While { condition, body } => {
+            StmtKind::While { condition, body } => {
                 let cond_ty = self.analyze_expr(condition)?;
-                if !self.types_equal(&cond_ty, &Type::Bool) { return Err("While condition must be bool".to_string()); }
+                if !self.types_equal(&cond_ty, &Type::Bool) { 
+                    return self.semantic_error(format!("While condition must be bool, found {:?}", cond_ty), condition.span); 
+                }
                 self.analyze_stmt(body)?;
                 Ok(())
             }
-            Stmt::Block(stmts) => { for s in stmts { self.analyze_stmt(s)?; } Ok(()) }
-            Stmt::ExprStmt(expr) => { self.analyze_expr(expr)?; Ok(()) }
-            Stmt::Return(expr) => {
+            StmtKind::Block(stmts) => { for s in stmts { self.analyze_stmt(s)?; } Ok(()) }
+            StmtKind::ExprStmt(expr) => { self.analyze_expr(expr)?; Ok(()) }
+            StmtKind::Return(expr) => {
                 if let Some(e) = expr { self.analyze_expr(e)?; }
                 Ok(())
             }
-            Stmt::Match { expr, arms } => {
+            StmtKind::Match { expr, arms } => {
                 let expr_ty = self.analyze_expr(expr)?;
                 for arm in arms {
                     let old_symbols = self.symbols.clone();
-                    self.analyze_pattern(&mut arm.pattern, &expr_ty)?;
+                    self.analyze_pattern(&mut arm.pattern, &expr_ty, span)?;
                     self.analyze_stmt(&mut arm.body)?;
                     self.symbols = old_symbols;
                 }
@@ -361,7 +378,7 @@ impl SemanticAnalyzer {
         }
     }
 
-    fn analyze_pattern(&mut self, pattern: &mut Pattern, expr_ty: &Type) -> Result<(), String> {
+    fn analyze_pattern(&mut self, pattern: &mut Pattern, expr_ty: &Type, span: Span) -> Result<(), CompilerError> {
         match pattern {
             Pattern::Variant(enum_name, variant_name, params) => {
                 if let Some(variants) = self.enums.get(enum_name) {
@@ -370,23 +387,24 @@ impl SemanticAnalyzer {
                         return Ok(());
                     }
                 }
-                Err(format!("Undeclared variant {}::{}", enum_name, variant_name))
+                self.semantic_error(format!("Undeclared variant {}::{}", enum_name, variant_name), span)
             }
             Pattern::Variable(name) => { self.symbols.insert(name.clone(), (expr_ty.clone(), false)); Ok(()) }
             Pattern::Literal(lit) => { self.analyze_expr(lit)?; Ok(()) }
         }
     }
 
-    fn analyze_expr(&mut self, expr: &mut Expr) -> Result<Type, String> {
-        match expr {
-            Expr::Unit => Ok(Type::Unit),
-            Expr::Int(_) => Ok(Type::I32),
-            Expr::Int64(_) => Ok(Type::I64),
-            Expr::Float(_) => Ok(Type::F32),
-            Expr::Float64(_) => Ok(Type::F64),
-            Expr::Bool(_) => Ok(Type::Bool),
-            Expr::String(_) => Ok(Type::Str),
-            Expr::Variable(name) => {
+    fn analyze_expr(&mut self, expr: &mut Expr) -> Result<Type, CompilerError> {
+        let span = expr.span;
+        match &mut expr.kind {
+            ExprKind::Unit => Ok(Type::Unit),
+            ExprKind::Int(_) => Ok(Type::I32),
+            ExprKind::Int64(_) => Ok(Type::I64),
+            ExprKind::Float(_) => Ok(Type::F32),
+            ExprKind::Float64(_) => Ok(Type::F64),
+            ExprKind::Bool(_) => Ok(Type::Bool),
+            ExprKind::String(_) => Ok(Type::Str),
+            ExprKind::Variable(name) => {
                 if let Some((ty, _)) = self.symbols.get(name) { Ok(ty.clone()) }
                 else {
                     if name.contains("::") {
@@ -397,10 +415,10 @@ impl SemanticAnalyzer {
                     } else if self.has_wildcard_phantom {
                         return Ok(Type::Any);
                     }
-                    Err(format!("Undeclared variable '{}'", name))
+                    self.semantic_error(format!("Undeclared variable '{}'", name), span)
                 }
             }
-            Expr::Binary(lhs, op, rhs) => {
+            ExprKind::Binary(lhs, op, rhs) => {
                 let l = self.analyze_expr(lhs)?;
                 let r = self.analyze_expr(rhs)?;
                 
@@ -418,7 +436,7 @@ impl SemanticAnalyzer {
                 }
 
                 if !self.types_equal(&l, &r) {
-                    return Err(format!("Type mismatch in binary operation: {:?} and {:?}", l, r));
+                    return self.semantic_error(format!("Type mismatch in binary operation: {:?} and {:?}", l, r), span);
                 }
                 match op {
                     BinaryOp::GreaterThan | BinaryOp::LessThan | BinaryOp::Equal => Ok(Type::Bool),
@@ -426,7 +444,7 @@ impl SemanticAnalyzer {
                     _ => Ok(l),
                 }
             }
-            Expr::MacroCall(name, args) => {
+            ExprKind::MacroCall(name, args) => {
                 for arg in args {
                     self.analyze_expr(arg)?;
                 }
@@ -436,7 +454,7 @@ impl SemanticAnalyzer {
                     Ok(Type::I32) // Macros return i32/Unit effectively for now
                 }
             }
-            Expr::Call(name, args, resolved_name) => {
+            ExprKind::Call(name, args, resolved_name) => {
                 if name == "Ok" {
                     let val_ty = self.analyze_expr(&mut args[0])?;
                     return Ok(Type::Result(Box::new(val_ty), Box::new(Type::Generic("E".into()))));
@@ -474,7 +492,7 @@ impl SemanticAnalyzer {
                         *resolved_name = Some(name.clone());
                         return Ok(Type::Any);
                     }
-                    return Err(format!("Undeclared function or variant '{}'", name));
+                    return self.semantic_error(format!("Undeclared function or variant '{}'", name), span);
                 };
 
                 *resolved_name = Some(found_name.clone());
@@ -495,7 +513,7 @@ impl SemanticAnalyzer {
                 }
                 Ok(ret)
             }
-            Expr::MethodCall(lhs, name, args, resolved_obj_name) => {
+            ExprKind::MethodCall(lhs, name, args, resolved_obj_name) => {
                 let mut lhs_ty = self.analyze_expr(lhs)?;
                 lhs_ty = self.resolve_type(&lhs_ty);
                 if lhs_ty == Type::Any {
@@ -516,9 +534,9 @@ impl SemanticAnalyzer {
                     Type::Custom(ref n, _) => (n.clone(), false),
                     Type::Ref(ref inner, _) | Type::BoxPtr(ref inner) | Type::RawPtr(ref inner, _) => match **inner {
                         Type::Custom(ref n, _) => (n.clone(), false),
-                        _ => return Err(format!("Method call '{}' on non-object type {:?}", name, lhs_ty)),
+                        _ => return self.semantic_error(format!("Method call '{}' on non-object type {:?}", name, lhs_ty), span),
                     },
-                    _ => return Err(format!("Method call '{}' on non-object type {:?}", name, lhs_ty)),
+                    _ => return self.semantic_error(format!("Method call '{}' on non-object type {:?}", name, lhs_ty), span),
                 };
                 
                 *resolved_obj_name = Some(obj_name.clone());
@@ -536,13 +554,13 @@ impl SemanticAnalyzer {
                         else { Ok(rt) }
                     } else { Ok(rt) }
                 } else {
-                    Err(format!("No method '{}' on {}", name, obj_name)) 
+                    self.semantic_error(format!("No method '{}' on {}", name, obj_name), span) 
                 }
             }
-            Expr::StructLiteral { name, fields, resolved_name } => {
+            ExprKind::StructLiteral { name, fields, resolved_name } => {
                 let target_name = if name == "self" || name == "Self" {
                     if let Some((Type::Custom(n, _), _)) = self.symbols.get("self") { n.clone() }
-                    else { return Err("Cannot use self outside impl".into()); }
+                    else { return self.semantic_error("Cannot use self outside impl".into(), span); }
                 } else { name.clone() };
                 *resolved_name = Some(target_name.clone());
                 for (_, fexpr) in fields {
@@ -550,7 +568,7 @@ impl SemanticAnalyzer {
                 }
                 Ok(Type::Custom(target_name, Vec::new()))
             }
-            Expr::MemberAccess(lhs, name) => {
+            ExprKind::MemberAccess(lhs, name) => {
                 let lhs_ty = self.analyze_expr(lhs)?;
                 if lhs_ty == Type::Any { return Ok(Type::Any); }
                 let actual_ty = match lhs_ty {
@@ -559,26 +577,30 @@ impl SemanticAnalyzer {
                     Type::Ref(inner, _) => *inner,
                     _ => lhs_ty,
                 };
-                if let Type::Custom(obj_name, _) = actual_ty {
-                    if let Some(fields) = self.objects.get(&obj_name) {
+                if let Type::Custom(ref obj_name, _) = actual_ty {
+                    if self.phantom_types.contains(obj_name) {
+                        return Ok(Type::Any);
+                    }
+                    if let Some(fields) = self.objects.get(obj_name) {
                         if let Some(ty) = fields.get(name) { return Ok(ty.clone()); }
                     }
                 }
-                Err(format!("No member '{}'", name))
+                self.semantic_error(format!("No member '{}' on type {:?}", name, actual_ty), span)
             }
-            Expr::IndexAccess(lhs, _index) => {
+            ExprKind::IndexAccess(lhs, index) => {
                 let lhs_ty = self.analyze_expr(lhs)?;
+                self.analyze_expr(index)?;
                 if lhs_ty == Type::Any { return Ok(Type::Any); }
                 let actual_ty = match lhs_ty {
                     Type::BoxPtr(inner) => *inner,
                     Type::RawPtr(inner, _) => *inner,
                     Type::Ref(inner, _) => *inner,
                     Type::Array(inner, _) => *inner,
-                    _ => return Err("Indexing only works on arrays or pointers".into()),
+                    _ => return self.semantic_error("Indexing only works on arrays or pointers".into(), span),
                 };
                 Ok(actual_ty)
             }
-            Expr::Alloc(inner, kind) => {
+            ExprKind::Alloc(inner, kind) => {
                 let ty = self.analyze_expr(inner)?;
                 match kind {
                     AllocKind::Box => Ok(Type::BoxPtr(Box::new(ty))),
@@ -586,30 +608,30 @@ impl SemanticAnalyzer {
                     AllocKind::RawConst => Ok(Type::RawPtr(Box::new(ty), false)),
                 }
             }
-            Expr::Borrow(inner, mutable) => {
+            ExprKind::Borrow(inner, mutable) => {
                 let ty = self.analyze_expr(inner)?;
                 Ok(Type::Ref(Box::new(ty), *mutable))
             }
-            Expr::Deref(inner) => {
+            ExprKind::Deref(inner) => {
                 let ty = self.analyze_expr(inner)?;
                 match ty {
                     Type::Ref(inner_ty, _) => Ok(*inner_ty),
                     Type::BoxPtr(inner_ty) => Ok(*inner_ty),
                     Type::RawPtr(inner_ty, _) => Ok(*inner_ty),
-                    _ => Err(format!("Cannot dereference type {:?}", ty)),
+                    _ => self.semantic_error(format!("Cannot dereference type {:?}", ty), span),
                 }
             }
-            Expr::Unwrap(inner) => {
+            ExprKind::Unwrap(inner) => {
                 let ty = self.analyze_expr(inner)?;
                 match ty {
                     Type::Result(ok, _) => Ok(*ok),
                     _ => Ok(ty), 
                 }
             }
-            Expr::Await(inner) => {
+            ExprKind::Await(inner) => {
                 self.analyze_expr(inner)
             }
-            Expr::Cast(inner, ty) => {
+            ExprKind::Cast(inner, ty) => {
                 self.analyze_expr(inner)?;
                 Ok(self.resolve_type(ty))
             }
