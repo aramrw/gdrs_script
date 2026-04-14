@@ -1,10 +1,14 @@
 use chumsky::prelude::*;
+use chumsky::input::ValueInput;
 use crate::ast::*;
-use crate::lexer::Token;
+use crate::lexer::{Token, Span};
 
-type TokenStream<'a> = &'a [Token];
+type ParserExtra<'a> = extra::Err<Rich<'a, Token, Span>>;
 
-fn type_parser<'a>() -> impl Parser<'a, TokenStream<'a>, Type, extra::Err<Rich<'a, Token>>> + Clone {
+fn type_parser<'a, I>() -> impl Parser<'a, I, Type, ParserExtra<'a>> + Clone 
+where
+    I: ValueInput<'a, Token = Token, Span = Span>,
+{
     recursive(|ty| {
         let base = choice((
             just(Token::ParenOpen).then(just(Token::ParenClose)).to(Type::Unit),
@@ -71,8 +75,11 @@ fn type_parser<'a>() -> impl Parser<'a, TokenStream<'a>, Type, extra::Err<Rich<'
     })
 }
 
-fn expr_parser<'a>() -> impl Parser<'a, TokenStream<'a>, Expr, extra::Err<Rich<'a, Token>>> + Clone {
-    let ty = type_parser();
+fn expr_parser<'a, I>() -> impl Parser<'a, I, Expr, ParserExtra<'a>> + Clone 
+where
+    I: ValueInput<'a, Token = Token, Span = Span>,
+{
+    let ty = type_parser::<I>();
     recursive(|expr| {
         let val = choice((
             just(Token::ParenOpen).then(just(Token::ParenClose)).to(Expr::Unit),
@@ -171,10 +178,9 @@ fn expr_parser<'a>() -> impl Parser<'a, TokenStream<'a>, Expr, extra::Err<Rich<'
             else { Expr::MemberAccess(Box::new(lhs), name) }
         });
 
-        let op = |t, op| just(t).to(op);
-        let mul_op = op(Token::Star, BinaryOp::Multiply).or(op(Token::Div, BinaryOp::Divide));
-        let add_op = op(Token::Plus, BinaryOp::Add).or(op(Token::Minus, BinaryOp::Subtract));
-        let cmp_op = op(Token::Gt, BinaryOp::GreaterThan).or(op(Token::Lt, BinaryOp::LessThan)).or(op(Token::DoubleEq, BinaryOp::Equal));
+        let mul_op = just(Token::Star).to(BinaryOp::Multiply).or(just(Token::Div).to(BinaryOp::Divide));
+        let add_op = just(Token::Plus).to(BinaryOp::Add).or(just(Token::Minus).to(BinaryOp::Subtract));
+        let cmp_op = just(Token::Gt).to(BinaryOp::GreaterThan).or(just(Token::Lt).to(BinaryOp::LessThan)).or(just(Token::DoubleEq).to(BinaryOp::Equal));
 
         let product = atom.clone().foldl(mul_op.then(atom).repeated(), |lhs, (op, rhs)| {
             Expr::Binary(Box::new(lhs), op, Box::new(rhs))
@@ -190,9 +196,12 @@ fn expr_parser<'a>() -> impl Parser<'a, TokenStream<'a>, Expr, extra::Err<Rich<'
     })
 }
 
-pub fn parser<'a>() -> impl Parser<'a, TokenStream<'a>, Program, extra::Err<Rich<'a, Token>>> {
-    let expr = expr_parser();
-    let ty = type_parser();
+pub fn parser<'a, I>() -> impl Parser<'a, I, Program, ParserExtra<'a>> 
+where
+    I: ValueInput<'a, Token = Token, Span = Span>,
+{
+    let expr = expr_parser::<I>();
+    let ty = type_parser::<I>();
 
     let stmt = recursive(|stmt| {
         let var_decl = just(Token::Var)
@@ -202,7 +211,7 @@ pub fn parser<'a>() -> impl Parser<'a, TokenStream<'a>, Program, extra::Err<Rich
             .then_ignore(just(Token::Eq))
             .then(expr.clone())
             .then_ignore(just(Token::Semicolon).or_not())
-            .map(|(((mut_kw, name), ty), value)| Stmt::VarDecl {
+            .map(|(((mut_kw, name), ty), value): (((Option<Token>, String), Option<Type>), Expr)| Stmt::VarDecl {
                 name, is_mutable: mut_kw.is_some(), ty, value
             });
 
@@ -236,7 +245,7 @@ pub fn parser<'a>() -> impl Parser<'a, TokenStream<'a>, Program, extra::Err<Rich
 
         let if_stmt = just(Token::If).ignore_then(expr.clone()).then_ignore(just(Token::Colon)).then(block.clone())
             .then(just(Token::Else).ignore_then(just(Token::Colon).or_not()).ignore_then(block.clone()).or_not())
-            .map(|((condition, then_branch), else_branch)| Stmt::If {
+            .map(|((condition, then_branch), else_branch): ((Expr, Stmt), Option<Stmt>)| Stmt::If {
                 condition, then_branch: Box::new(then_branch), else_branch: else_branch.map(Box::new),
             });
 
@@ -354,7 +363,7 @@ pub fn parser<'a>() -> impl Parser<'a, TokenStream<'a>, Program, extra::Err<Rich
 
     let obj_parser = attribute_parser.clone()
         .then(obj_inner.clone())
-        .map(|(attributes, (((name, generics), rust_path), fields))| ObjectDecl { name, generics, fields: fields.unwrap_or_default(), rust_path, attributes });
+        .map(|(attributes, (((name, generics), rust_path), fields)): (Vec<String>, (((String, Vec<String>), Option<String>), Option<Vec<Field>>))| ObjectDecl { name, generics, fields: fields.unwrap_or_default(), rust_path, attributes });
 
     let extern_obj_parser = just(Token::Extern).ignore_then(obj_parser.clone());
 
@@ -368,7 +377,7 @@ pub fn parser<'a>() -> impl Parser<'a, TokenStream<'a>, Program, extra::Err<Rich
                     select! { Token::Ident(name) => name }
                         .then(ty.clone().separated_by(just(Token::Comma)).collect::<Vec<_>>().delimited_by(just(Token::ParenOpen), just(Token::ParenClose)).or_not())
                         .then_ignore(just(Token::Semicolon).or_not())
-                        .map(|(name, types)| Variant { name, types: types.unwrap_or_default() })
+                        .map(|(name, types): (String, Option<Vec<Type>>)| Variant { name, types: types.unwrap_or_default() })
                         .repeated().collect()
                 )
                 .then_ignore(just(Token::Dedent))
@@ -399,10 +408,10 @@ pub fn parser<'a>() -> impl Parser<'a, TokenStream<'a>, Program, extra::Err<Rich
         .then(generic_params.clone().or_not().map(|g| g.unwrap_or_default()))
         .then_ignore(just(Token::Colon).or_not())
         .then(just(Token::Indent).ignore_then(method_parser.clone().repeated().collect()).then_ignore(just(Token::Dedent)))
-        .map(|(((_impl_gens, target), _target_gens), functions)| {
-            let mut gens = _impl_gens;
+        .map(|(((impl_gens, target), target_gens), functions): (((Vec<String>, String), Vec<String>), Vec<Function>)| {
+            let mut gens = impl_gens;
             if gens.is_empty() {
-                gens = _target_gens;
+                gens = target_gens;
             }
             ImplDecl { target, generics: gens, functions }
         });
@@ -437,7 +446,7 @@ pub fn parser<'a>() -> impl Parser<'a, TokenStream<'a>, Program, extra::Err<Rich
             )
     )
         .then_ignore(just(Token::Semicolon).or_not())
-        .map(|((is_crate, path), (items, is_wildcard))| Decl::Use(UseDecl { 
+        .map(|((is_crate, path), (items, is_wildcard)): ((_, Vec<String>), (Vec<String>, bool))| Decl::Use(UseDecl { 
             path, 
             items, 
             is_wildcard,
@@ -450,9 +459,9 @@ pub fn parser<'a>() -> impl Parser<'a, TokenStream<'a>, Program, extra::Err<Rich
         .then(choice((
             select! { Token::String(version) => version },
             just(Token::BraceOpen)
-                .ignore_then(any().filter(|t: &Token| t != &Token::BraceClose).repeated().collect::<Vec<_>>())
+                .ignore_then(any().filter(|tok: &Token| tok != &Token::BraceClose).repeated().collect::<Vec<_>>())
                 .then_ignore(just(Token::BraceClose))
-                .map(|tokens| {
+                .map(|tokens: Vec<Token>| {
                     let mut s = String::from("{ ");
                     for (i, t) in tokens.iter().enumerate() {
                         if i > 0 { s.push(' '); }

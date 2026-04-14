@@ -3,6 +3,7 @@ mod compiler;
 mod parser;
 mod sema;
 mod lexer;
+mod error;
 
 use chumsky::prelude::*;
 use compiler::compile;
@@ -73,9 +74,20 @@ fn main() {
 
     while let Some(current_file) = queue.pop_front() {
         let source_code = fs::read_to_string(&current_file).expect("Error reading file");
-        let tokens = lex(&source_code);
+        let tokens = match lex(&source_code) {
+            Ok(t) => t,
+            Err(e) => {
+                use miette::Report;
+                let report = Report::from(e).with_source_code(source_code);
+                eprintln!("{:?}", report);
+                std::process::exit(1);
+            }
+        };
 
-        match parser().parse(&tokens).into_result() {
+        let end_span = SimpleSpan::new((), source_code.len()..source_code.len());
+        let input = tokens.as_slice().split_token_span(end_span);
+
+        match parser().parse(input).into_result() {
             Ok(program) => {
                 let current_dir = current_file.parent().unwrap();
                 let mut deps = Vec::new();
@@ -102,8 +114,11 @@ fn main() {
                 processed.insert(current_file, (program, deps));
             }
             Err(parse_errs) => {
+                use miette::Report;
+                use crate::error::CompilerError;
                 for err in parse_errs {
-                    eprintln!("[parse error in {:?}]: {:?}", current_file, err);
+                    let report = Report::from(CompilerError::from_rich(err)).with_source_code(source_code.clone());
+                    eprintln!("{:?}", report);
                 }
                 std::process::exit(1);
             }

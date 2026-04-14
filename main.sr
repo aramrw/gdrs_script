@@ -12,12 +12,14 @@ obj Triangle:
 #[macroquad::main("window")]
 async fn main():
     var t = Triangle { 
-		v1: prelude::vec2(30.0, 120.0),
+		v1: prelude::vec2(200.0, 500.0),
 		v2: prelude::vec2(120.0, 30.0),
 		v3: prelude::vec2(120.0, 90.0)
 	}
 
     while true:
         prelude::clear_background(prelude::BLACK)
+				// draw v1 point
+				prelude::draw_circle(v1.x, v1.y, 40.0, prelude::RED)
         prelude::draw_triangle(t.v1, t.v2, t.v3, prelude::WHITE)
         prelude::next_frame().await

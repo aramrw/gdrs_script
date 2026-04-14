@@ -1,9 +1,8 @@
 use lazy_static::lazy_static;
-use proc_macro2::{Ident, TokenStream};
+use proc_macro2::TokenStream;
 use quote::quote;
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::fs;
-use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::Mutex;
 

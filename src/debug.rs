@@ -1,5 +1,6 @@
 mod ast;
 mod lexer;
+mod error;
 
 use lexer::lex;
 use std::fs;
