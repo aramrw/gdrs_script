@@ -94,7 +94,7 @@ fn compile_id(name: &str) -> TokenStream {
         }
 
         // For everything else namespaced, check if it's a known root module
-        let root_modules = ["mem", "sr_fs", "sr_io", "sr_math", "util", "vec", "option"];
+        let root_modules = ["mem", "sr_fs", "sr_io", "sr_math", "sr_string", "util", "vec", "option"];
         if root_modules.contains(&first) {
             let tokens: Vec<TokenStream> = parts
                 .iter()
@@ -117,7 +117,8 @@ fn compile_id(name: &str) -> TokenStream {
     }
 
     // If it's a known root-level module, also prepend crate::
-    let root_modules = ["mem", "sr_fs", "sr_io", "sr_math", "util", "vec", "option"];
+    let root_modules = ["mem", "sr_fs", "sr_io", "sr_math", "sr_string", "util", "vec", "option"];
+
     if root_modules.contains(&name) {
         let id = quote::format_ident!("{}", name);
         return quote!(crate::#id);
@@ -241,7 +242,7 @@ fn compile_expr(expr: &Expr, target_obj: Option<&String>) -> TokenStream {
             let name_id = compile_id(name);
             let args_compiled: Vec<_> = args.iter().map(|a| compile_expr(a, target_obj)).collect();
             if name == "println" || name == "print" {
-                let format_str = vec!["{:?}"; args_compiled.len()].join(" ");
+                let format_str = vec!["{}"; args_compiled.len()].join(" ");
                 quote! { #name_id!(#format_str, #( &#args_compiled ),*) }
             } else if name == "typeof" {
                 let arg = &args_compiled[0];
@@ -283,9 +284,24 @@ fn compile_expr(expr: &Expr, target_obj: Option<&String>) -> TokenStream {
         }
         ExprKind::MethodCall(lhs, name, args, _resolved_obj_name) => {
             let l = compile_expr(lhs, target_obj);
-            let id = quote::format_ident!("{}", name);
+            let id = if let Some(obj) = _resolved_obj_name {
+                if obj == "vector"
+                    || obj == "str"
+                    || obj == "string"
+                    || obj == "i32"
+                    || obj == "i64"
+                    || obj == "f32"
+                    || obj == "f64"
+                {
+                    quote::format_ident!("solar_{}", name)
+                } else {
+                    quote::format_ident!("{}", name)
+                }
+            } else {
+                quote::format_ident!("{}", name)
+            };
             let args = args.iter().map(|a| compile_expr(a, target_obj));
-            quote! { (#l).#id(#( #args ),*) }
+            quote! { (#l).#id(#( &#args ),*) }
         }
         ExprKind::MemberAccess(lhs, name) => {
             let l = compile_expr(lhs, target_obj);
@@ -295,7 +311,7 @@ fn compile_expr(expr: &Expr, target_obj: Option<&String>) -> TokenStream {
         ExprKind::IndexAccess(lhs, index) => {
             let l = compile_expr(lhs, target_obj);
             let i = compile_expr(index, target_obj);
-            quote! { (unsafe { &*#l.add(crate::SolarAsSize::as_size(&#i)) }) }
+            quote! { (#l).solar_index(crate::SolarAsVal::as_val(&#i)) }
         }
         ExprKind::Cast(inner, ty) => {
             let e = compile_expr(inner, target_obj);
@@ -428,6 +444,18 @@ fn compile_stmt(stmt: &Stmt, is_last: bool, target_obj: Option<&String>, expecte
             let cond = compile_expr(condition, target_obj);
             let b = compile_stmt(body, false, target_obj, expected_ret);
             quote! { while #cond #b }
+        }
+        StmtKind::Loop { body } => {
+            let b = compile_stmt(body, false, target_obj, expected_ret);
+            quote! { loop #b }
+        }
+        StmtKind::Break(expr) => {
+            let e = expr.as_ref().map(|e| compile_expr(e, target_obj));
+            if let Some(tokens) = e {
+                quote! { break #tokens; }
+            } else {
+                quote! { break; }
+            }
         }
         StmtKind::Return(expr) => {
             let e = expr.as_ref().map(|e| compile_expr(e, target_obj));
@@ -606,6 +634,8 @@ pub fn compile(program: Program, output_name: &str) {
     // Reset and collect mappings
     if let Ok(mut mappings) = RUST_MAPPINGS.lock() {
         mappings.clear();
+        mappings.insert("string".to_string(), "crate::sr_string".to_string());
+        mappings.insert("String".to_string(), "crate::sr_string".to_string());
         collect_metadata(
             &program.declarations,
             "",
@@ -667,6 +697,26 @@ pub fn compile(program: Program, output_name: &str) {
             fn solar_get(&self, i: &i32) -> T { self[*i as usize].clone() }
         }
 
+        pub trait SolarIndex<Idx> {
+            type Output;
+            fn solar_index(&self, i: Idx) -> &Self::Output;
+        }
+
+        impl<T> SolarIndex<i32> for Vec<T> {
+            type Output = T;
+            fn solar_index(&self, i: i32) -> &T { &self[i as usize] }
+        }
+
+        impl<T> SolarIndex<i32> for *mut T {
+            type Output = T;
+            fn solar_index(&self, i: i32) -> &T { unsafe { &*self.add(i as usize) } }
+        }
+
+        impl<T> SolarIndex<i32> for *const T {
+            type Output = T;
+            fn solar_index(&self, i: i32) -> &T { unsafe { &*self.add(i as usize) } }
+        }
+
         pub trait SolarAdd<Rhs = Self> {
             type Output;
             fn solar_add(&self, rhs: &Rhs) -> Self::Output;
@@ -702,6 +752,11 @@ pub fn compile(program: Program, output_name: &str) {
             fn solar_add(&self, rhs: &String) -> String { format!("{}{}", self, rhs) }
         }
 
+        impl<'a> SolarAdd<&'a String> for &str {
+            type Output = String;
+            fn solar_add(&self, rhs: &&'a String) -> String { format!("{}{}", self, *rhs) }
+        }
+
         impl SolarAdd<&str> for String {
             type Output = String;
             fn solar_add(&self, rhs: &&str) -> String { format!("{}{}", self, rhs) }
@@ -710,6 +765,11 @@ pub fn compile(program: Program, output_name: &str) {
         impl SolarAdd<String> for String {
             type Output = String;
             fn solar_add(&self, rhs: &String) -> String { format!("{}{}", self, rhs) }
+        }
+
+        impl<'a> SolarAdd<&'a String> for String {
+            type Output = String;
+            fn solar_add(&self, rhs: &&'a String) -> String { format!("{}{}", self, *rhs) }
         }
 
         impl SolarAdd<i32> for &str {
@@ -1023,7 +1083,7 @@ pub fn compile(program: Program, output_name: &str) {
             }
 
             pub fn println(content: impl AsRef<str>) {
-                println!("{:?}", content.as_ref());
+                println!("{}", content.as_ref());
             }
 
             pub fn exit(code: i32) {
@@ -1033,6 +1093,10 @@ pub fn compile(program: Program, output_name: &str) {
             pub fn args() -> Vec < String > {
                 std::env::args().collect()
             }
+        }
+
+        pub mod sr_string {
+            pub fn new() -> String { String::new() }
         }
 
             pub mod sr_math {
@@ -1250,7 +1314,7 @@ fn compile_decls(decls: &[Decl], tokens: &mut TokenStream) {
 
                 for part in parts.into_iter().rev() {
                     let id = quote::format_ident!("{}", part);
-                    mod_tokens = quote! { pub mod #id { use std; use crate::{SolarStr, SolarString, SolarVec, SolarAdd, SolarSub, SolarMul, SolarDiv, SolarGT, SolarLT, SolarEq, SolarI32, SolarI64, SolarF32, SolarF64, SolarAsArg, SolarAsVal, SolarAsSize, sr_math, sr_io, sr_fs}; #mod_tokens } };
+                    mod_tokens = quote! { pub mod #id { use std; use crate::{SolarStr, SolarString, SolarVec, SolarIndex, SolarAdd, SolarSub, SolarMul, SolarDiv, SolarGT, SolarLT, SolarEq, SolarI32, SolarI64, SolarF32, SolarF64, SolarAsArg, SolarAsVal, SolarAsSize, sr_math, sr_io, sr_fs}; #mod_tokens } };
                 }
                 tokens.extend(mod_tokens);
             }

@@ -1,0 +1,16 @@
+fn main():
+    // string literals are of type 'str'
+    var s = "hello"
+    println!(s)
+    println!(s.len())
+
+    // string::new() creates a heap-allocated 'string'
+    var mut dynamic_s = string::new()
+    println!(dynamic_s)
+    println!(dynamic_s.len())
+
+    if s.contains("ll"):
+        println!("s contains 'll'")
+
+    var parts = s.split("e")
+    println!(parts.len())

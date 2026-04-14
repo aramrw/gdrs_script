@@ -1,0 +1,6 @@
+use std::io
+
+fn main():
+    var args = io::args()
+    var current = string::new()
+    println!(current)

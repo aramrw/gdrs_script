@@ -9,7 +9,7 @@ pub type Span = SimpleSpan<usize>;
 #[derive(Clone, Debug, PartialEq)]
 pub enum Token {
     // Keywords
-    Fn, Var, Mut, Const, Box, If, Else, Print, Log, LogLn, Obj, Impl, Enum, Match, While, Return, Extern, SelfKw, Use, ResultKw, ErrorKw, Rust, Async, Await, Dependency, Any, As,
+    Fn, Var, Mut, Const, Box, If, Else, Print, Log, LogLn, Obj, Impl, Enum, Match, While, Return, Extern, SelfKw, Use, ResultKw, ErrorKw, Rust, Async, Await, Dependency, Any, As, Break, Loop,
     // Types
     I32, I64, F32, F64, Bool, Str, StringKw, File,
     // Literals
@@ -59,6 +59,8 @@ impl Token {
             Token::Dependency => "dependency".to_string(),
             Token::Any => "any".to_string(),
             Token::As => "as".to_string(),
+            Token::Break => "break".to_string(),
+            Token::Loop => "loop".to_string(),
             Token::I32 => "i32".to_string(),
             Token::I64 => "i64".to_string(),
             Token::F32 => "f32".to_string(),
@@ -325,6 +327,8 @@ pub fn lex(source: &str) -> Result<Vec<(Token, Span)>, LexError> {
                         "await" => tokens.push((Token::Await, span)),
                         "dependency" => tokens.push((Token::Dependency, span)),
                         "self" => tokens.push((Token::SelfKw, span)),
+                        "break" => tokens.push((Token::Break, span)),
+                        "loop" => tokens.push((Token::Loop, span)),
                         "result" => tokens.push((Token::ResultKw, span)),
                         "error" => tokens.push((Token::ErrorKw, span)),
                         "any" => tokens.push((Token::Any, span)),

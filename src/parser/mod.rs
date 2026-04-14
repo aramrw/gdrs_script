@@ -81,6 +81,12 @@ where
 {
     let ty = type_parser::<I>();
     recursive(|expr| {
+        let any_name = choice((
+            select! { Token::Ident(name) => name },
+            just(Token::Str).to("str".to_string()),
+            just(Token::StringKw).to("string".to_string()),
+        ));
+
         let val = choice((
             just(Token::ParenOpen).then(just(Token::ParenClose)).to(ExprKind::Unit),
             select! { Token::Int(v) => ExprKind::Int(v) },
@@ -89,8 +95,8 @@ where
             select! { Token::Float64(v) => ExprKind::Float64(v) },
             select! { Token::Boolean(v) => ExprKind::Bool(v) },
             select! { Token::String(v) => ExprKind::String(v) },
-            select! { Token::Ident(name) => name }
-                .then(just(Token::DoubleColon).ignore_then(select! { Token::Ident(name) => name }).repeated().collect::<Vec<_>>())
+            any_name.clone()
+                .then(just(Token::DoubleColon).ignore_then(any_name.clone()).repeated().collect::<Vec<_>>())
                 .map(|(first, rest)| {
                     let mut full = first;
                     for part in rest {
@@ -148,8 +154,8 @@ where
             .ignore_then(expr.clone())
             .map_with(|e, extr| Expr { kind: ExprKind::Negate(Box::new(e)), span: extr.span() });
 
-        let call = select! { Token::Ident(name) => name }
-            .then(just(Token::DoubleColon).ignore_then(select! { Token::Ident(name) => name }).repeated().collect::<Vec<_>>())
+        let call = any_name.clone()
+            .then(just(Token::DoubleColon).ignore_then(any_name.clone()).repeated().collect::<Vec<_>>())
             .map(|(first, rest)| {
                 let mut full = first;
                 for part in rest {
@@ -273,6 +279,13 @@ where
         let while_stmt = just(Token::While).ignore_then(expr.clone()).then_ignore(just(Token::Colon)).then(block.clone())
             .map_with(|(condition, body), e| Stmt { kind: StmtKind::While { condition, body: Box::new(body) }, span: e.span() });
 
+        let loop_stmt = just(Token::Loop).ignore_then(just(Token::Colon).or_not()).then(block.clone())
+            .map_with(|(_, body), e| Stmt { kind: StmtKind::Loop { body: Box::new(body) }, span: e.span() });
+
+        let break_stmt = just(Token::Break).ignore_then(expr.clone().or_not())
+            .then_ignore(just(Token::Semicolon).or_not())
+            .map_with(|val, e| Stmt { kind: StmtKind::Break(val), span: e.span() });
+
         let return_stmt = just(Token::Return).ignore_then(expr.clone().or_not())
             .then_ignore(just(Token::Semicolon).or_not())
             .map_with(|val, e| Stmt { kind: StmtKind::Return(val), span: e.span() });
@@ -316,7 +329,7 @@ where
             .map_with(|e, extra| Stmt { kind: StmtKind::ExprStmt(e), span: extra.span() })
             .then_ignore(just(Token::Semicolon).or_not());
 
-        choice((ptr_decl, var_decl, assign, block, if_stmt, while_stmt, return_stmt, match_stmt, expr_stmt))
+        choice((ptr_decl, var_decl, assign, block, if_stmt, while_stmt, loop_stmt, break_stmt, return_stmt, match_stmt, expr_stmt))
     });
 
     let generic_params = select! { Token::Ident(name) => name }.separated_by(just(Token::Comma)).collect::<Vec<_>>().delimited_by(just(Token::Lt), just(Token::Gt));

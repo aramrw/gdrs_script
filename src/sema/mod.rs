@@ -113,6 +113,7 @@ impl SemanticAnalyzer {
         self.functions.insert("str::contains".to_string(), (vec![Type::Str, Type::Str], Some(Type::Bool)));
         self.functions.insert("str::split".to_string(), (vec![Type::Str, Type::Str], Some(Type::Array(Box::new(Type::String), 0))));
         
+        self.functions.insert("string::new".to_string(), (vec![], Some(Type::String)));
         self.functions.insert("string::append".to_string(), (vec![Type::String, Type::Str], None));
         self.functions.insert("string::len".to_string(), (vec![Type::String], Some(Type::I32)));
         self.functions.insert("string::contains".to_string(), (vec![Type::String, Type::Str], Some(Type::Bool)));
@@ -359,6 +360,14 @@ impl SemanticAnalyzer {
                 self.analyze_stmt(body)?;
                 Ok(())
             }
+            StmtKind::Loop { body } => {
+                self.analyze_stmt(body)?;
+                Ok(())
+            }
+            StmtKind::Break(expr) => {
+                if let Some(e) = expr { self.analyze_expr(e)?; }
+                Ok(())
+            }
             StmtKind::Block(stmts) => { for s in stmts { self.analyze_stmt(s)?; } Ok(()) }
             StmtKind::ExprStmt(expr) => { self.analyze_expr(expr)?; Ok(()) }
             StmtKind::Return(expr) => {
@@ -406,6 +415,7 @@ impl SemanticAnalyzer {
             ExprKind::String(_) => Ok(Type::Str),
             ExprKind::Variable(name) => {
                 if let Some((ty, _)) = self.symbols.get(name) { Ok(ty.clone()) }
+                else if self.functions.contains_key(name) { Ok(Type::Any) }
                 else {
                     if name.contains("::") {
                         let parts: Vec<&str> = name.split("::").collect();
@@ -540,6 +550,11 @@ impl SemanticAnalyzer {
                 };
                 
                 *resolved_obj_name = Some(obj_name.clone());
+
+                if self.phantom_types.contains(&obj_name) {
+                    for arg in args { self.analyze_expr(arg)?; }
+                    return Ok(Type::Any);
+                }
 
                 let full_name = format!("{}::{}", obj_name, name);
                 
