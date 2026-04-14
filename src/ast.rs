@@ -119,7 +119,8 @@ pub struct ImplDecl {
 #[derive(Debug, Clone)]
 pub struct UseDecl {
     pub path: Vec<String>,
-    pub items: Vec<String>, // Empty means import the whole path (last element), or use a wildcard? 
+    pub items: Vec<String>, 
+    pub is_wildcard: bool,  // Support ::* 
     pub is_crate: bool,     // If it starts with 'crate::'
 }
 

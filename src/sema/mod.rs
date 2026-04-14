@@ -7,6 +7,7 @@ pub struct SemanticAnalyzer {
     enums: HashMap<String, HashMap<String, Vec<Type>>>,
     symbols: HashMap<String, (Type, bool)>,
     phantom_types: HashSet<String>,
+    has_wildcard_phantom: bool,
     current_obj: Option<String>,
     current_prefix: String,
 }
@@ -19,6 +20,7 @@ impl SemanticAnalyzer {
             enums: HashMap::new(),
             symbols: HashMap::new(),
             phantom_types: HashSet::new(),
+            has_wildcard_phantom: false,
             current_obj: None,
             current_prefix: String::new(),
         }
@@ -236,7 +238,11 @@ impl SemanticAnalyzer {
                 Decl::Use(u) if u.is_crate => {
                     // This is an external crate import, we can treat these as 'Phantom' types
                     let base_path = u.path.join("::");
-                    if u.items.is_empty() {
+                    if u.is_wildcard {
+                        self.has_wildcard_phantom = true;
+                    }
+
+                    if u.items.is_empty() && !u.is_wildcard {
                         let name = u.path.last().unwrap().clone();
                         self.objects.insert(name.clone(), HashMap::new());
                         self.phantom_types.insert(name.clone());
@@ -244,7 +250,7 @@ impl SemanticAnalyzer {
                         if let Ok(mut mappings) = crate::compiler::RUST_MAPPINGS.lock() {
                             mappings.insert(name, format!("::{}", base_path));
                         }
-                    } else {
+                    } else if !u.items.is_empty() {
                         for item in &u.items {
                             self.objects.insert(item.clone(), HashMap::new());
                             self.phantom_types.insert(item.clone());
@@ -388,6 +394,8 @@ impl SemanticAnalyzer {
                         if self.phantom_types.contains(parts[0]) {
                             return Ok(Type::Any);
                         }
+                    } else if self.has_wildcard_phantom {
+                        return Ok(Type::Any);
                     }
                     Err(format!("Undeclared variable '{}'", name))
                 }
@@ -461,6 +469,10 @@ impl SemanticAnalyzer {
                             *resolved_name = Some(name.clone());
                             return Ok(Type::Any);
                         }
+                    } else if self.has_wildcard_phantom {
+                        for arg in args { self.analyze_expr(arg)?; }
+                        *resolved_name = Some(name.clone());
+                        return Ok(Type::Any);
                     }
                     return Err(format!("Undeclared function or variant '{}'", name));
                 };

@@ -149,7 +149,7 @@ fn expr_parser<'a>() -> impl Parser<'a, TokenStream<'a>, Expr, extra::Err<Rich<'
             .then(expr.clone().separated_by(just(Token::Comma)).collect::<Vec<_>>().delimited_by(just(Token::ParenOpen), just(Token::ParenClose)))
             .map(|((name, bang), args)| if bang.is_some() { Expr::MacroCall(name, args) } else { Expr::Call(name, args, None) });
 
-        let term = choice((call, borrow, alloc_or_deref, array_init, struct_literal, val, expr.clone().delimited_by(just(Token::ParenOpen), just(Token::ParenClose))));
+        let term = choice((struct_literal, call, borrow, alloc_or_deref, array_init, val, expr.clone().delimited_by(just(Token::ParenOpen), just(Token::ParenClose))));
 
         let suffix = choice((
             just(Token::Dot).ignore_then(select! { Token::Ident(name) => name })
@@ -347,7 +347,7 @@ pub fn parser<'a>() -> impl Parser<'a, TokenStream<'a>, Program, extra::Err<Rich
         .then_ignore(just(Token::Colon).or_not())
         .then(
             just(Token::Indent)
-                .ignore_then(select! { Token::Ident(name) => name }.then_ignore(just(Token::Colon)).then(ty.clone()).map(|(name, ty)| Field { name, ty }).repeated().collect())
+                .ignore_then(select! { Token::Ident(name) => name }.then_ignore(just(Token::Colon)).then(ty.clone()).then_ignore(just(Token::Semicolon).or_not()).map(|(name, ty)| Field { name, ty }).repeated().collect())
                 .then_ignore(just(Token::Dedent))
                 .or_not()
         );
@@ -367,6 +367,7 @@ pub fn parser<'a>() -> impl Parser<'a, TokenStream<'a>, Program, extra::Err<Rich
                 .ignore_then(
                     select! { Token::Ident(name) => name }
                         .then(ty.clone().separated_by(just(Token::Comma)).collect::<Vec<_>>().delimited_by(just(Token::ParenOpen), just(Token::ParenClose)).or_not())
+                        .then_ignore(just(Token::Semicolon).or_not())
                         .map(|(name, types)| Variant { name, types: types.unwrap_or_default() })
                         .repeated().collect()
                 )
@@ -423,18 +424,23 @@ pub fn parser<'a>() -> impl Parser<'a, TokenStream<'a>, Program, extra::Err<Rich
                     .collect::<Vec<_>>()
             )
             .then(
-                just(Token::DoubleColon).ignore_then(
-                    select! { Token::Ident(name) => name }
-                        .separated_by(just(Token::Comma))
-                        .collect::<Vec<_>>()
-                        .delimited_by(just(Token::BraceOpen), just(Token::BraceClose))
-                ).or_not()
+                choice((
+                    just(Token::DoubleColon).ignore_then(just(Token::Star)).to((Vec::new(), true)),
+                    just(Token::DoubleColon).ignore_then(
+                        select! { Token::Ident(name) => name }
+                            .separated_by(just(Token::Comma))
+                            .collect::<Vec<_>>()
+                            .delimited_by(just(Token::BraceOpen), just(Token::BraceClose))
+                    ).map(|items| (items, false)),
+                    empty().to((Vec::new(), false)),
+                ))
             )
     )
         .then_ignore(just(Token::Semicolon).or_not())
-        .map(|((is_crate, path), items)| Decl::Use(UseDecl { 
+        .map(|((is_crate, path), (items, is_wildcard))| Decl::Use(UseDecl { 
             path, 
-            items: items.unwrap_or_default(), 
+            items, 
+            is_wildcard,
             is_crate: is_crate.is_some() 
         }));
 

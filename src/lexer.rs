@@ -313,5 +313,7 @@ pub fn lex(source: &str) -> Vec<Token> {
     }
 
     while indents.len() > 1 { indents.pop(); tokens.push(Token::Dedent); }
+    let tokens = tokens;
+    // for t in &tokens { println!("{:?}", t); }
     tokens
 }

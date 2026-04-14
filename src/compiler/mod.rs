@@ -1262,14 +1262,15 @@ fn compile_decls(decls: &[Decl], tokens: &mut TokenStream) {
                 }
                 
                 let path = quote!(#( #path_tokens )::*);
-                
-                if u.items.is_empty() {
+
+                if u.is_wildcard {
+                    tokens.extend(quote!(pub use #path::*;));
+                } else if u.items.is_empty() {
                     tokens.extend(quote!(pub use #path;));
                 } else {
                     let items = u.items.iter().map(|i| quote::format_ident!("{}", i));
                     tokens.extend(quote!(pub use #path::{#( #items ),*};));
-                }
-            }
+                }            }
         }
     }
 }
