@@ -1,11 +1,12 @@
 use crate::ast::*;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 pub struct SemanticAnalyzer {
     functions: HashMap<String, (Vec<Type>, Option<Type>)>,
     objects: HashMap<String, HashMap<String, Type>>,
     enums: HashMap<String, HashMap<String, Vec<Type>>>,
     symbols: HashMap<String, (Type, bool)>,
+    phantom_types: HashSet<String>,
     current_obj: Option<String>,
     current_prefix: String,
 }
@@ -17,6 +18,7 @@ impl SemanticAnalyzer {
             objects: HashMap::new(),
             enums: HashMap::new(),
             symbols: HashMap::new(),
+            phantom_types: HashSet::new(),
             current_obj: None,
             current_prefix: String::new(),
         }
@@ -43,6 +45,7 @@ impl SemanticAnalyzer {
             (Type::Result(ok1, err1), Type::Result(ok2, err2)) => {
                 self.types_equal(ok1, ok2) && self.types_equal(err1, err2)
             }
+            (Type::Any, _) | (_, Type::Any) => true,
             (Type::Generic(_), _) | (_, Type::Generic(_)) => true, // Simple unification for now
             _ => a == b,
         }
@@ -50,6 +53,7 @@ impl SemanticAnalyzer {
 
     fn resolve_type(&self, ty: &Type) -> Type {
         match ty {
+            Type::Any => Type::Any,
             Type::SelfType => {
                 if let Some(name) = &self.current_obj { Type::Custom(name.clone(), Vec::new()) }
                 else { Type::SelfType }
@@ -229,6 +233,27 @@ impl SemanticAnalyzer {
                     let new_prefix = if prefix.is_empty() { name.clone() } else { format!("{}::{}", prefix, name) };
                     self.collect_decls(inner, &new_prefix)?;
                 }
+                Decl::Use(u) if u.is_crate => {
+                    // This is an external crate import, we can treat these as 'Phantom' types
+                    let base_path = u.path.join("::");
+                    if u.items.is_empty() {
+                        let name = u.path.last().unwrap().clone();
+                        self.objects.insert(name.clone(), HashMap::new());
+                        self.phantom_types.insert(name.clone());
+                        // Register a mapping for the compiler
+                        if let Ok(mut mappings) = crate::compiler::RUST_MAPPINGS.lock() {
+                            mappings.insert(name, format!("::{}", base_path));
+                        }
+                    } else {
+                        for item in &u.items {
+                            self.objects.insert(item.clone(), HashMap::new());
+                            self.phantom_types.insert(item.clone());
+                            if let Ok(mut mappings) = crate::compiler::RUST_MAPPINGS.lock() {
+                                mappings.insert(item.clone(), format!("::{}::{}", base_path, item));
+                            }
+                        }
+                    }
+                }
                 _ => {}
             }
         }
@@ -254,6 +279,10 @@ impl SemanticAnalyzer {
                 Decl::Module(name, inner) => {
                     let new_prefix = if prefix.is_empty() { name.clone() } else { format!("{}::{}", prefix, name) };
                     self.analyze_decls(inner, &new_prefix)?;
+                }
+                Decl::Use(u) if !u.is_crate => {
+                    // Standard use - for now just add the names to symbols if we want them as constants/types
+                    // But we don't have a good way to resolve them yet.
                 }
                 _ => {}
             }
@@ -357,6 +386,10 @@ impl SemanticAnalyzer {
                 let l = self.analyze_expr(lhs)?;
                 let r = self.analyze_expr(rhs)?;
                 
+                if l == Type::Any || r == Type::Any {
+                    return Ok(Type::Any);
+                }
+                
                 if *op == BinaryOp::Add {
                     let is_l_string = l == Type::String || l == Type::Str;
                     let is_r_string = r == Type::String || r == Type::Str;
@@ -411,6 +444,13 @@ impl SemanticAnalyzer {
                 } else if let Some((_, rt)) = self.functions.get(name) {
                     (name.clone(), rt.clone())
                 } else {
+                    if name.contains("::") {
+                        let parts: Vec<&str> = name.split("::").collect();
+                        if self.phantom_types.contains(parts[0]) {
+                            for arg in args { self.analyze_expr(arg)?; }
+                            return Ok(Type::Any);
+                        }
+                    }
                     return Err(format!("Undeclared function or variant '{}'", name));
                 };
 
@@ -435,6 +475,10 @@ impl SemanticAnalyzer {
             Expr::MethodCall(lhs, name, args, resolved_obj_name) => {
                 let mut lhs_ty = self.analyze_expr(lhs)?;
                 lhs_ty = self.resolve_type(&lhs_ty);
+                if lhs_ty == Type::Any {
+                    for arg in args { self.analyze_expr(arg)?; }
+                    return Ok(Type::Any);
+                }
                 if name == "clone" {
                     return Ok(lhs_ty);
                 }
@@ -485,6 +529,7 @@ impl SemanticAnalyzer {
             }
             Expr::MemberAccess(lhs, name) => {
                 let lhs_ty = self.analyze_expr(lhs)?;
+                if lhs_ty == Type::Any { return Ok(Type::Any); }
                 let actual_ty = match lhs_ty {
                     Type::BoxPtr(inner) => *inner,
                     Type::RawPtr(inner, _) => *inner,
@@ -500,6 +545,7 @@ impl SemanticAnalyzer {
             }
             Expr::IndexAccess(lhs, _index) => {
                 let lhs_ty = self.analyze_expr(lhs)?;
+                if lhs_ty == Type::Any { return Ok(Type::Any); }
                 let actual_ty = match lhs_ty {
                     Type::BoxPtr(inner) => *inner,
                     Type::RawPtr(inner, _) => *inner,

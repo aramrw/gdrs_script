@@ -293,13 +293,23 @@ pub fn parser<'a>() -> impl Parser<'a, TokenStream<'a>, Program, extra::Err<Rich
                 is_mutable: mut_kw.is_some() 
             }),
         just(Token::Mut).or_not()
-            .then(choice((select! { Token::Ident(name) => name }, just(Token::SelfKw).to("self".to_string()))))
+            .then(select! { Token::Ident(name) => name }.or(just(Token::SelfKw).to("self".to_string())))
             .then(just(Token::Colon).ignore_then(ty.clone()).or_not())
-            .map(|((mut_kw, name), ty): ((Option<Token>, String), Option<Type>)| Param { 
-                name, 
-                ty: ty.unwrap_or(Type::SelfType), 
-                is_mutable: mut_kw.is_some() 
-            })
+            .map(|((mut_kw, name), ty): ((Option<Token>, String), Option<Type>)| {
+                if let Some(t) = ty {
+                    Param { name, ty: t, is_mutable: mut_kw.is_some() }
+                } else {
+                    // If no colon, the 'name' might actually be the type (anonymous param)
+                    // This is a bit of a heuristic for RFFI
+                    Param { 
+                        name: format!("__arg_{}", name), 
+                        ty: Type::Custom(name, Vec::new()), 
+                        is_mutable: mut_kw.is_some() 
+                    }
+                }
+            }),
+        // Direct type as anonymous param
+        ty.clone().map(|t| Param { name: "_".to_string(), ty: t, is_mutable: false })
     ));
 
     let rust_path = just(Token::Eq).ignore_then(select! { Token::String(s) => s });
@@ -365,6 +375,8 @@ pub fn parser<'a>() -> impl Parser<'a, TokenStream<'a>, Program, extra::Err<Rich
 
     let extern_enum_parser = just(Token::Extern).ignore_then(enum_parser.clone());
 
+    let method_parser = func_parser.clone().or(extern_func_parser.clone()).then_ignore(just(Token::Semicolon).or_not());
+
     let impl_parser = just(Token::Impl)
         .ignore_then(generic_params.clone().or_not().map(|g| g.unwrap_or_default()))
         .then(
@@ -381,7 +393,7 @@ pub fn parser<'a>() -> impl Parser<'a, TokenStream<'a>, Program, extra::Err<Rich
         )
         .then(generic_params.clone().or_not().map(|g| g.unwrap_or_default()))
         .then_ignore(just(Token::Colon).or_not())
-        .then(just(Token::Indent).ignore_then(func_parser.clone().repeated().collect()).then_ignore(just(Token::Dedent)))
+        .then(just(Token::Indent).ignore_then(method_parser.clone().repeated().collect()).then_ignore(just(Token::Dedent)))
         .map(|(((_impl_gens, target), _target_gens), functions)| {
             let mut gens = _impl_gens;
             if gens.is_empty() {
@@ -395,33 +407,32 @@ pub fn parser<'a>() -> impl Parser<'a, TokenStream<'a>, Program, extra::Err<Rich
         .then(select! { Token::Ident(name) => name }) // Simpler target for now
         .then(generic_params.clone().or_not().map(|g| g.unwrap_or_default()))
         .then_ignore(just(Token::Colon).or_not())
-        .then(
-            just(Token::Indent)
-                .ignore_then(
-                    just(Token::Fn).ignore_then(select! { Token::Ident(name) => name })
-                        .then(generic_params.clone().or_not().map(|g| g.unwrap_or_default()))
-                        .then(param.clone().separated_by(just(Token::Comma)).collect::<Vec<_>>().delimited_by(just(Token::ParenOpen), just(Token::ParenClose)))
-                        .then(just(Token::Arrow).ignore_then(ty.clone()).or_not())
-                        .map(|(((name, generics), params), return_type)| Function { 
-                            name, generics, params, return_type, 
-                            body: Stmt::Block(Vec::new()),
-                            is_async: false, rust_path: None,
-                            attributes: Vec::new()
-                        })
-                        .repeated().collect()
-                )
-                .then_ignore(just(Token::Dedent))
-        )
+        .then(just(Token::Indent).ignore_then(method_parser.clone().repeated().collect()).then_ignore(just(Token::Dedent)))
         .map(|(((_impl_gens, target), _target_gens), functions)| ImplDecl { target, generics: _impl_gens, functions });
 
     let use_parser = just(Token::Use).ignore_then(
-        select! { Token::Ident(name) => name }
-            .separated_by(just(Token::DoubleColon))
-            .at_least(1)
-            .collect::<Vec<_>>()
+        just(Token::Ident("crate".to_string())).then(just(Token::DoubleColon)).or_not()
+            .then(
+                select! { Token::Ident(name) => name }
+                    .separated_by(just(Token::DoubleColon))
+                    .at_least(1)
+                    .collect::<Vec<_>>()
+            )
+            .then(
+                just(Token::DoubleColon).ignore_then(
+                    select! { Token::Ident(name) => name }
+                        .separated_by(just(Token::Comma))
+                        .collect::<Vec<_>>()
+                        .delimited_by(just(Token::BraceOpen), just(Token::BraceClose))
+                ).or_not()
+            )
     )
         .then_ignore(just(Token::Semicolon).or_not())
-        .map(Decl::Use);
+        .map(|((is_crate, path), items)| Decl::Use(UseDecl { 
+            path, 
+            items: items.unwrap_or_default(), 
+            is_crate: is_crate.is_some() 
+        }));
 
     let rust_dependency_parser = just(Token::Rust).ignore_then(just(Token::Dependency))
         .ignore_then(select! { Token::Ident(name) => name }.or(select! { Token::String(name) => name }))
@@ -454,13 +465,13 @@ pub fn parser<'a>() -> impl Parser<'a, TokenStream<'a>, Program, extra::Err<Rich
         rust_dependency_parser,
         rust_block_parser,
         func_parser.map(Decl::Function), 
-        obj_parser.map(Decl::Object), 
-        enum_parser.map(Decl::Enum), 
-        impl_parser.map(Decl::Impl), 
-        extern_func_parser.map(Decl::ExternFunction), 
-        extern_obj_parser.map(Decl::ExternObject), 
-        extern_enum_parser.map(Decl::ExternEnum),
-        extern_impl_parser.map(Decl::ExternImpl),
+        obj_parser.map(Decl::Object).then_ignore(just(Token::Semicolon).or_not()), 
+        enum_parser.map(Decl::Enum).then_ignore(just(Token::Semicolon).or_not()), 
+        impl_parser.map(Decl::Impl).then_ignore(just(Token::Semicolon).or_not()), 
+        extern_func_parser.map(Decl::ExternFunction).then_ignore(just(Token::Semicolon).or_not()), 
+        extern_obj_parser.map(Decl::ExternObject).then_ignore(just(Token::Semicolon).or_not()), 
+        extern_enum_parser.map(Decl::ExternEnum).then_ignore(just(Token::Semicolon).or_not()),
+        extern_impl_parser.map(Decl::ExternImpl).then_ignore(just(Token::Semicolon).or_not()),
         use_parser
     ));
 

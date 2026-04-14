@@ -10,10 +10,17 @@ use std::sync::Mutex;
 use crate::ast::*;
 
 lazy_static! {
-    static ref RUST_MAPPINGS: Mutex<HashMap<String, String>> = Mutex::new(HashMap::new());
+    pub(crate) static ref RUST_MAPPINGS: Mutex<HashMap<String, String>> = Mutex::new(HashMap::new());
 }
 
 fn compile_id(name: &str) -> TokenStream {
+    // Check if it's already a complex Rust path (generics, pointers, etc.)
+    if name.contains('<') || name.contains('(') || name.contains('[') || name.contains('*') {
+        return name
+            .parse()
+            .expect("Failed to parse complex rust path as TokenStream");
+    }
+
     // Check for explicit rust mapping
     if let Ok(mappings) = RUST_MAPPINGS.lock() {
         if let Some(rust_path) = mappings.get(name) {
@@ -61,6 +68,19 @@ fn compile_id(name: &str) -> TokenStream {
             return quote!(::std::#( #tokens )::*);
         }
 
+        // crate:: is for external rust crates in the generated project
+        if first == "crate" {
+            let rest = &parts[1..];
+            let tokens: Vec<TokenStream> = rest
+                .iter()
+                .map(|p| {
+                    let id = quote::format_ident!("{}", p);
+                    quote!(#id)
+                })
+                .collect();
+            return quote!(::#( #tokens )::*);
+        }
+
         // std:: is Solar's standard library, which we transpile into our own crate
         if first == "std" {
             let rest = &parts[1..];
@@ -95,13 +115,6 @@ fn compile_id(name: &str) -> TokenStream {
             })
             .collect();
         return quote!(#( #tokens )::*);
-    }
-
-    // Check if it's already a complex Rust path (generics, pointers, etc.)
-    if name.contains('<') || name.contains('(') || name.contains('[') || name.contains('*') {
-        return name
-            .parse()
-            .expect("Failed to parse complex rust path as TokenStream");
     }
 
     // If it's a known root-level module, also prepend crate::
@@ -169,6 +182,7 @@ fn compile_type(ty: &Type) -> TokenStream {
             let e = compile_type(err);
             quote!(Result<#o, #e>)
         }
+        Type::Any => quote!(_),
         Type::Error => quote!(Box<dyn ::std::error::Error>),
     }
 }
@@ -1212,7 +1226,26 @@ fn compile_decls(decls: &[Decl], tokens: &mut TokenStream) {
                 }
                 tokens.extend(mod_tokens);
             }
-            Decl::Use(_) => {}
+            Decl::Use(u) => {
+                let mut path_tokens = Vec::new();
+                for (i, part) in u.path.iter().enumerate() {
+                    let id = quote::format_ident!("{}", part);
+                    if i == 0 && u.is_crate {
+                        path_tokens.push(quote!(::#id));
+                    } else {
+                        path_tokens.push(quote!(#id));
+                    }
+                }
+                
+                let path = quote!(#( #path_tokens )::*);
+                
+                if u.items.is_empty() {
+                    tokens.extend(quote!(pub use #path;));
+                } else {
+                    let items = u.items.iter().map(|i| quote::format_ident!("{}", i));
+                    tokens.extend(quote!(pub use #path::{#( #items ),*};));
+                }
+            }
         }
     }
 }

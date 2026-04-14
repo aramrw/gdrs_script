@@ -80,16 +80,21 @@ fn main() {
                 let current_dir = current_file.parent().unwrap();
                 let mut deps = Vec::new();
                 for decl in &program.declarations {
-                    if let Decl::Use(parts) = decl {
-                        if let Some(mod_path) = resolve_module(current_dir, std_path.as_deref(), parts) {
+                    if let Decl::Use(u) = decl {
+                        if u.is_crate {
+                            continue;
+                        }
+                        if let Some(mod_path) = resolve_module(current_dir, std_path.as_deref(), &u.path) {
                             let abs_mod_path = fs::canonicalize(mod_path).unwrap();
-                            deps.push((parts.join("::"), abs_mod_path.clone()));
+                            let mod_name = u.path.join("::");
+                            deps.push((mod_name, abs_mod_path.clone()));
                             if !loaded.contains(&abs_mod_path) {
                                 loaded.insert(abs_mod_path.clone());
                                 queue.push_back(abs_mod_path);
                             }
                         } else {
-                            eprintln!("[module error]: Could not resolve module '{}' from {:?}", parts.join("::"), current_file);
+                            let mod_name = u.path.join("::");
+                            eprintln!("[module error]: Could not resolve module '{}' from {:?}", mod_name, current_file);
                             std::process::exit(1);
                         }
                     }
@@ -129,7 +134,11 @@ fn main() {
         }
         
         for decl in &program.declarations {
-            if !matches!(decl, Decl::Use(_)) {
+            if let Decl::Use(u) = decl {
+                if u.is_crate {
+                    decls.push(decl.clone());
+                }
+            } else if !matches!(decl, Decl::Module(_, _)) {
                 decls.push(decl.clone());
             }
         }

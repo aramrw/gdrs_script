@@ -10,6 +10,7 @@ pub enum Type {
     Custom(String, Vec<Type>),
     SelfType,
     Result(Box<Type>, Box<Type>),
+    Any,
     Error,
 }
 
@@ -115,6 +116,13 @@ pub struct ImplDecl {
 }
 
 #[derive(Debug, Clone)]
+pub struct UseDecl {
+    pub path: Vec<String>,
+    pub items: Vec<String>, // Empty means import the whole path (last element), or use a wildcard? 
+    pub is_crate: bool,     // If it starts with 'crate::'
+}
+
+#[derive(Debug, Clone)]
 pub enum Decl {
     Function(Function),
     Object(ObjectDecl),
@@ -125,7 +133,7 @@ pub enum Decl {
     ExternEnum(EnumDecl),
     ExternImpl(ImplDecl),
     Module(String, Vec<Decl>),
-    Use(Vec<String>),
+    Use(UseDecl),
     RustDependency(String, String),
     RustBlock(String),
 }
