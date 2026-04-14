@@ -25,4 +25,4 @@ async fn main():
         prelude::clear_background(prelude::BLACK)
         prelude::draw_triangle(t.v1, t.v2, t.v3, prelude::WHITE)
         prelude::next_frame().await
-```rust
+```
