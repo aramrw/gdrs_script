@@ -1,0 +1,307 @@
+use crate::ast::*;
+use crate::lexer::{Span, Token};
+use crate::parser::types::type_parser;
+use crate::parser::{ExprParserExt, ParserExt, ParserExtra, ident};
+use chumsky::input::ValueInput;
+use chumsky::prelude::*;
+
+pub fn expr_parser<'a, I>() -> impl Parser<'a, I, Expr, ParserExtra<'a>> + Clone
+where
+    I: ValueInput<'a, Token = Token, Span = Span>,
+{
+    let ty = type_parser::<I>();
+
+    recursive(|expr| {
+        let type_args = ty
+            .clone()
+            .separated_by(just(Token::Comma))
+            .collect::<Vec<_>>()
+            .delimited_by(just(Token::Lt), just(Token::Gt))
+            .or_not()
+            .map(|g| g.unwrap_or_default());
+
+        let path_part = ident()
+            .then(type_args)
+            .map(|(name, generics)| PathPart { name, generics });
+
+        let identifier_path = path_part
+            .clone()
+            .separated_by(just(Token::DoubleColon))
+            .at_least(1)
+            .collect::<Vec<_>>();
+
+        let val = choice((
+            just(Token::ParenOpen)
+                .then(just(Token::ParenClose))
+                .to(ExprKind::Unit),
+            select! { Token::Int(v) => ExprKind::Int(v) },
+            select! { Token::Int64(v) => ExprKind::Int64(v) },
+            select! { Token::Float(v) => ExprKind::Float(v) },
+            select! { Token::Float64(v) => ExprKind::Float64(v) },
+            select! { Token::Boolean(v) => ExprKind::Bool(v) },
+            select! { Token::String(v) => ExprKind::String(v) },
+            identifier_path.clone().map(ExprKind::Variable),
+            just(Token::SelfKw).to(ExprKind::Variable(vec![PathPart {
+                name: "self".to_string(),
+                generics: Vec::new(),
+            }])),
+        ))
+        .into_expr();
+
+        let alloc_or_deref = just(Token::Star)
+            .ignore_then(choice((
+                just(Token::Box)
+                    .to(AllocKind::Box)
+                    .then(expr.clone())
+                    .map(|(_, e)| ExprKind::Alloc(Box::new(e), AllocKind::Box)),
+                just(Token::Mut)
+                    .to(AllocKind::RawMut)
+                    .then(expr.clone())
+                    .map(|(_, e)| ExprKind::Alloc(Box::new(e), AllocKind::RawMut)),
+                just(Token::Const)
+                    .to(AllocKind::RawConst)
+                    .then(expr.clone())
+                    .map(|(_, e)| ExprKind::Alloc(Box::new(e), AllocKind::RawConst)),
+                just(Token::Rc)
+                    .to(AllocKind::Rc)
+                    .then(expr.clone())
+                    .map(|(_, e)| ExprKind::Alloc(Box::new(e), AllocKind::Rc)),
+                just(Token::Arc)
+                    .to(AllocKind::Arc)
+                    .then(expr.clone())
+                    .map(|(_, e)| ExprKind::Alloc(Box::new(e), AllocKind::Arc)),
+                expr.clone().map(|e| ExprKind::Deref(Box::new(e))),
+            )))
+            .into_expr();
+
+        let downgrade = just(Token::Tilde)
+            .ignore_then(expr.clone())
+            .map(|e| ExprKind::Downgrade(Box::new(e)))
+            .into_expr();
+
+        let array_init = expr
+            .clone()
+            .then_ignore(just(Token::Semicolon))
+            .then(expr.clone())
+            .brackets()
+            .map(|(v, s)| {
+                ExprKind::Call(
+                    vec![PathPart {
+                        name: "array_init".to_string(),
+                        generics: Vec::new(),
+                    }],
+                    vec![v, s],
+                    None,
+                    None,
+                )
+            })
+            .into_expr();
+
+        let struct_literal = identifier_path
+            .clone()
+            .or(just(Token::SelfKw).to(vec![PathPart {
+                name: "self".to_string(),
+                generics: Vec::new(),
+            }]))
+            .then(
+                ident()
+                    .then(just(Token::Colon).ignore_then(expr.clone()).or_not())
+                    .map_with(|(name, val), e| {
+                        (
+                            name.clone(),
+                            val.unwrap_or(Expr {
+                                kind: ExprKind::Variable(vec![PathPart {
+                                    name,
+                                    generics: Vec::new(),
+                                }]),
+                                span: e.span(),
+                                ty: None,
+                            }),
+                        )
+                    })
+                    .separated_by(just(Token::Comma))
+                    .collect::<Vec<_>>()
+                    .braces(),
+            )
+            .map(|(path, fields)| ExprKind::StructLiteral {
+                path,
+                fields,
+                resolved_name: None,
+            })
+            .into_expr();
+
+        let borrow = just(Token::Amp)
+            .ignore_then(just(Token::Mut).or_not())
+            .then(expr.clone())
+            .map(|(mut_kw, e)| ExprKind::Borrow(Box::new(e), mut_kw.is_some()))
+            .into_expr();
+
+        let negate = just(Token::Minus)
+            .ignore_then(expr.clone())
+            .map(|e| ExprKind::Negate(Box::new(e)))
+            .into_expr();
+
+        let macro_name = choice((ident(), just(Token::Str).to("str".to_string())));
+
+        let namespaced_call = identifier_path
+            .clone()
+            .map(Some)
+            .or(macro_name.map(|n| {
+                Some(vec![PathPart {
+                    name: n,
+                    generics: Vec::new(),
+                }])
+            }))
+            .or(empty().to(None))
+            .then(just(Token::Bang).or_not())
+            .then(
+                expr.clone()
+                    .separated_by(just(Token::Comma))
+                    .collect::<Vec<_>>()
+                    .parens(),
+            )
+            .map(|((path, bang), args)| {
+                if bang.is_some() {
+                    let full_name = path
+                        .unwrap_or_default()
+                        .into_iter()
+                        .map(|p| p.name)
+                        .collect::<Vec<_>>()
+                        .join("::");
+                    ExprKind::MacroCall(full_name, args)
+                } else {
+                    ExprKind::Call(path.unwrap_or_default(), args, None, None)
+                }
+            })
+            .into_expr();
+
+        let term = choice((
+            struct_literal,
+            namespaced_call,
+            borrow,
+            negate,
+            alloc_or_deref,
+            downgrade,
+            array_init,
+            val,
+            expr.clone().parens(),
+        ));
+
+        #[derive(Clone)]
+        enum Suffix {
+            Method(String, Option<Vec<Expr>>),
+            Index(Expr),
+            Try,
+            TildeUnwrap,
+            Await,
+            Cast(Type),
+        }
+
+        let suffix = choice((
+            just(Token::Dot)
+                .ignore_then(ident())
+                .then(
+                    expr.clone()
+                        .separated_by(just(Token::Comma))
+                        .collect::<Vec<_>>()
+                        .parens()
+                        .or_not(),
+                )
+                .map(|(name, args)| Suffix::Method(name, args)),
+            expr.clone().brackets().map(Suffix::Index),
+            just(Token::QuestionMark).to(Suffix::Try),
+            just(Token::Tilde).to(Suffix::TildeUnwrap),
+            just(Token::Dot)
+                .ignore_then(just(Token::Await))
+                .to(Suffix::Await),
+            just(Token::As).ignore_then(ty.clone()).map(Suffix::Cast),
+        ));
+
+        let atom = term.clone().foldl(suffix.repeated(), |lhs, suff| {
+            let span = lhs.span;
+            match suff {
+                Suffix::Cast(ty) => Expr {
+                    kind: ExprKind::Cast(Box::new(lhs), ty),
+                    span,
+                    ty: None,
+                },
+                Suffix::Await => Expr {
+                    kind: ExprKind::Await(Box::new(lhs)),
+                    span,
+                    ty: None,
+                },
+                Suffix::TildeUnwrap => Expr {
+                    kind: ExprKind::Unwrap(Box::new(lhs)),
+                    span,
+                    ty: None,
+                },
+                Suffix::Try => Expr {
+                    kind: ExprKind::Try(Box::new(lhs)),
+                    span,
+                    ty: None,
+                },
+                Suffix::Index(idx) => Expr {
+                    kind: ExprKind::IndexAccess(Box::new(lhs), Box::new(idx)),
+                    span,
+                    ty: None,
+                },
+                Suffix::Method(name, Some(args)) => Expr {
+                    kind: ExprKind::MethodCall(Box::new(lhs), name, args, None, None),
+                    span,
+                    ty: None,
+                },
+                Suffix::Method(name, None) => Expr {
+                    kind: ExprKind::MemberAccess(Box::new(lhs), name),
+                    span,
+                    ty: None,
+                },
+            }
+        });
+
+        let mul_op = just(Token::Star)
+            .to(BinaryOp::Multiply)
+            .or(just(Token::Div).to(BinaryOp::Divide));
+        let add_op = just(Token::Plus)
+            .to(BinaryOp::Add)
+            .or(just(Token::Minus).to(BinaryOp::Subtract));
+        let cmp_op = choice((
+            just(Token::GtEq).to(BinaryOp::GreaterThanOrEqual),
+            just(Token::LtEq).to(BinaryOp::LessThanOrEqual),
+            just(Token::DoubleEq).to(BinaryOp::Equal),
+            just(Token::Gt).to(BinaryOp::GreaterThan),
+            just(Token::Lt).to(BinaryOp::LessThan),
+        ));
+
+        let product = atom
+            .clone()
+            .foldl(mul_op.then(atom).repeated(), |lhs, (op, rhs)| {
+                let span = lhs.span;
+                Expr {
+                    kind: ExprKind::Binary(Box::new(lhs), op, Box::new(rhs)),
+                    span,
+                    ty: None,
+                }
+            });
+
+        let sum = product
+            .clone()
+            .foldl(add_op.then(product).repeated(), |lhs, (op, rhs)| {
+                let span = lhs.span;
+                Expr {
+                    kind: ExprKind::Binary(Box::new(lhs), op, Box::new(rhs)),
+                    span,
+                    ty: None,
+                }
+            });
+
+        sum.clone()
+            .foldl(cmp_op.then(sum).repeated(), |lhs, (op, rhs)| {
+                let span = lhs.span;
+                Expr {
+                    kind: ExprKind::Binary(Box::new(lhs), op, Box::new(rhs)),
+                    span,
+                    ty: None,
+                }
+            })
+    })
+}
