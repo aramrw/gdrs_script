@@ -9,13 +9,13 @@ pub type Span = SimpleSpan<usize>;
 #[derive(Clone, Debug, PartialEq)]
 pub enum Token {
     // Keywords
-    Fn, Var, Mut, Const, Box, Rc, Arc, If, Else, Print, Log, LogLn, Obj, Impl, Enum, Match, While, Return, Extern, SelfKw, Use, ResultKw, ErrorKw, Rust, Async, Await, Dependency, Any, As, Break, Loop,
+    Fn, Var, Mut, Const, Trait, For, Box, Rc, Arc, If, Else, Print, Log, LogLn, Obj, Impl, Enum, Match, While, Return, Extern, SelfKw, Use, ResultKw, ErrorKw, Rust, Async, Await, Dependency, As, Break, Loop,
     // Types
-    I32, I64, F32, F64, Bool, Str, StringKw, File,
+    I32, I64, F32, F64, Bool, Str,
     // Literals
     Int(i32), Int64(i64), Float(f32), Float64(f64), Boolean(bool), String(String), Ident(String),
     // Symbols
-    Plus, Minus, Star, Div, Eq, DoubleEq, Amp, Colon, Arrow, Dot, Gt, Lt, QuestionMark, Bang,
+    Plus, Minus, Star, Div, Eq, DoubleEq, Amp, Colon, Arrow, Dot, Gt, Lt, GtEq, LtEq, QuestionMark, Bang,
     ParenOpen, ParenClose, BraceOpen, BraceClose, BracketOpen, BracketClose,
     Comma, Semicolon, DoubleColon, FatArrow, Tilde,
     // Significant Whitespace
@@ -34,6 +34,7 @@ impl Token {
         match self {
             Token::Fn => "fn".to_string(),
             Token::Var => "var".to_string(),
+            Token::Trait => "trait".to_string(),
             Token::Mut => "mut".to_string(),
             Token::Const => "const".to_string(),
             Token::Box => "box".to_string(),
@@ -59,8 +60,8 @@ impl Token {
             Token::Async => "async".to_string(),
             Token::Await => "await".to_string(),
             Token::Dependency => "dependency".to_string(),
-            Token::Any => "any".to_string(),
             Token::As => "as".to_string(),
+            Token::For => "for".to_string(),
             Token::Break => "break".to_string(),
             Token::Loop => "loop".to_string(),
             Token::I32 => "i32".to_string(),
@@ -69,8 +70,6 @@ impl Token {
             Token::F64 => "f64".to_string(),
             Token::Bool => "bool".to_string(),
             Token::Str => "str".to_string(),
-            Token::StringKw => "String".to_string(),
-            Token::File => "File".to_string(),
             Token::Int(i) => i.to_string(),
             Token::Int64(i) => i.to_string(),
             Token::Float(f) => f.to_string(),
@@ -90,6 +89,8 @@ impl Token {
             Token::Dot => ".".to_string(),
             Token::Gt => ">".to_string(),
             Token::Lt => "<".to_string(),
+            Token::GtEq => ">=".to_string(),
+            Token::LtEq => "<=".to_string(),
             Token::QuestionMark => "?".to_string(),
             Token::Bang => "!".to_string(),
             Token::ParenOpen => "(".to_string(),
@@ -198,8 +199,22 @@ pub fn lex(source: &str) -> Result<Vec<(Token, Span)>, LexError> {
                 '&' => tokens.push((Token::Amp, span(1))),
                 '*' => tokens.push((Token::Star, span(1))),
                 '/' => tokens.push((Token::Div, span(1))),
-                '>' => tokens.push((Token::Gt, span(1))),
-                '<' => tokens.push((Token::Lt, span(1))),
+                '>' => {
+                    if chars.peek().map(|&(_, c)| c) == Some('=') {
+                        chars.next();
+                        tokens.push((Token::GtEq, span(2)));
+                    } else {
+                        tokens.push((Token::Gt, span(1)));
+                    }
+                }
+                '<' => {
+                    if chars.peek().map(|&(_, c)| c) == Some('=') {
+                        chars.next();
+                        tokens.push((Token::LtEq, span(2)));
+                    } else {
+                        tokens.push((Token::Lt, span(1)));
+                    }
+                }
                 '.' => tokens.push((Token::Dot, span(1))),
                 '?' => tokens.push((Token::QuestionMark, span(1))),
                 '!' => tokens.push((Token::Bang, span(1))),
@@ -316,6 +331,7 @@ pub fn lex(source: &str) -> Result<Vec<(Token, Span)>, LexError> {
                     match s.as_str() {
                         "fn" => tokens.push((Token::Fn, span)),
                         "var" => tokens.push((Token::Var, span)),
+                        "trait" => tokens.push((Token::Trait, span)),
                         "mut" => tokens.push((Token::Mut, span)),
                         "const" => tokens.push((Token::Const, span)),
                         "box" => tokens.push((Token::Box, span)),
@@ -336,6 +352,7 @@ pub fn lex(source: &str) -> Result<Vec<(Token, Span)>, LexError> {
                         "use" => tokens.push((Token::Use, span)),
                         "rust" => tokens.push((Token::Rust, span)),
                         "as" => tokens.push((Token::As, span)),
+                        "for" => tokens.push((Token::For, span)),
                         "async" => tokens.push((Token::Async, span)),
                         "await" => tokens.push((Token::Await, span)),
                         "dependency" => tokens.push((Token::Dependency, span)),
@@ -344,15 +361,12 @@ pub fn lex(source: &str) -> Result<Vec<(Token, Span)>, LexError> {
                         "loop" => tokens.push((Token::Loop, span)),
                         "result" => tokens.push((Token::ResultKw, span)),
                         "error" => tokens.push((Token::ErrorKw, span)),
-                        "any" => tokens.push((Token::Any, span)),
                         "i32" => tokens.push((Token::I32, span)),
                         "i64" => tokens.push((Token::I64, span)),
                         "f32" => tokens.push((Token::F32, span)),
                         "f64" => tokens.push((Token::F64, span)),
                         "bool" => tokens.push((Token::Bool, span)),
                         "str" => tokens.push((Token::Str, span)),
-                        "string" => tokens.push((Token::StringKw, span)),
-                        "file" => tokens.push((Token::File, span)),
                         "true" => tokens.push((Token::Boolean(true), span)),
                         "false" => tokens.push((Token::Boolean(false), span)),
                         _ => tokens.push((Token::Ident(s), span)),

@@ -1,27 +1,17 @@
-rust dependency macroquad = "0.4"
-use crate::macroquad::prelude::*;
-use crate::macroquad::math::Vec2
+use std::vec
 
-obj Circle:
-	r: f32
-	pos: Vec2
+fn main():
+    var mut vector = vec::Vector::new(0)
+    vector.push(10)
+    vector.push(20)
+    vector.push(30)
 
-impl Circle:
-	fn new(pos: Vec2, r: f32) -> Self:
-		Self { pos, r }
-		
-	fn draw(&self):
-		var pos = &self.pos;
-		draw_circle(pos.x, pos.y, self.r, RED);
-		
+    println!("Vector len: {}", vector.len())
+    println!("Item at 0: {}", vector.get(0))
+    println!("Item at 1: {}", vector.get(1))
+    println!("Item at 2: {}", vector.get(2))
 
+		var test_none = vector.get(40)
+		println!(test_none)
 
-#[macroquad::main("window")]
-async fn main():
-	var circle = Circle::new(vec2(250.0, 200.0), 25.0)
-	*const c_ptr = circle as *const Circle
-
-	loop:
-		clear_background(BLACK)
-		circle.draw()
-		next_frame().await
+    return Ok(())

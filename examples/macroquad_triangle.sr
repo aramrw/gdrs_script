@@ -12,7 +12,7 @@ obj Triangle:
 impl Triangle:
     fn draw_points(&self):
         // changing it to &*self compiles xD
-        var t = &*self;
+        var t = &self;
         draw_circle(t.a.x, t.a.y, 15.0, GREEN)
         draw_circle(t.b.x, t.b.y, 15.0, BLUE)
         draw_circle(t.c.x, t.c.y, 15.0, RED)

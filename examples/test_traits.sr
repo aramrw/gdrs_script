@@ -1,0 +1,29 @@
+trait Actor:
+    fn update(&mut self)
+    fn get_health(&self) -> i32
+
+obj Player:
+    health: i32
+
+impl Actor for Player:
+    fn update(&mut self):
+        self.health = self.health - 1
+        println!("Player updated, health: ", self.health)
+
+    fn get_health(&self) -> i32:
+        return self.health
+
+fn tick<T: Actor>(target: &mut T):
+    target.update()
+
+fn main():
+    var mut p = Player { health: 10 }
+    
+    println!("Initial health: ", p.get_health())
+    
+    tick(&mut p)
+    tick(&mut p)
+    
+    println!("Final health: ", p.get_health())
+    
+    return Ok(())

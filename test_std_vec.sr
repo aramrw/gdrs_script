@@ -1,0 +1,9 @@
+use std::vec
+
+fn main():
+    var v = vec::Vector<i32>::new(0)
+    v.push(1)
+    v.push(2)
+    println!("Vector length: {}", v.len())
+    println!("Vector item 0: {}", v.get(0))
+    println!("Vector item 1: {}", v.get(1))

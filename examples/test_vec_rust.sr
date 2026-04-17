@@ -1,3 +1,5 @@
+use rust::vec::Vec
+
 # test if we can use Vec directly
 obj Vector<T>:
     inner: Vec<T>
