@@ -1,8 +1,0 @@
-{
-  "name": "tree-sitter-solar",
-  "version": "0.1.0",
-  "main": "bindings/node",
-  "devDependencies": {
-    "tree-sitter-cli": "^0.20.8"
-  }
-}

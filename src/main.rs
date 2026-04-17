@@ -4,6 +4,7 @@ mod parser;
 mod sema;
 mod lexer;
 mod error;
+mod codegen;
 
 #[global_allocator]
 static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
