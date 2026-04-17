@@ -2,6 +2,8 @@ use tower_lsp::jsonrpc::Result;
 use tower_lsp::lsp_types::*;
 use tower_lsp::{Client, LanguageServer, LspService, Server};
 
+mod formatter;
+
 struct Backend {
     client: Client,
 }
@@ -26,6 +28,8 @@ impl LanguageServer for Backend {
     }
 
     async fn formatting(&self, _params: DocumentFormattingParams) -> Result<Option<Vec<TextEdit>>> {
+        // In a real implementation, we would get the document text here.
+        // For now, this is a hollow implementation.
         Ok(None)
     }
 }
