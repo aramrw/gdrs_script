@@ -1,3 +1,6 @@
-fn main():
 
-    return Ok(())
+fn main() -> Result<(), Error>:
+	var mut testing = 0
+	testing = testing + 20
+	println!(testing)
+	return Ok(())

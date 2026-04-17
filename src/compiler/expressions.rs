@@ -43,19 +43,37 @@ pub fn compile_expr(expr: &Expr, target_obj: Option<&String>, is_mut: bool) -> T
                 .iter()
                 .map(|a| wrap_expr_for_ref(a, target_obj, false))
                 .collect();
-            if name == "println" || name == "print" {
+            if name == "println" || name == "print" || name == "log" || name == "logln" {
+                let actual_name = match name.as_str() {
+                    "log" => "print",
+                    "logln" => "println",
+                    _ => name,
+                };
+                let name_id = quote::format_ident!("{}", actual_name);
                 if let Some(Expr {
                     kind: ExprKind::String(fmt),
                     ..
                 }) = args.get(0)
                 {
+                    let mut format_str = fmt.clone();
                     let rest_compiled = &args_compiled[1..];
-                    quote! { #name_id!(#fmt, #( #rest_compiled ),*) }
+
+                    // Count existing placeholders
+                    let placeholders = format_str.matches("{}").count();
+                    for _ in placeholders..rest_compiled.len() {
+                        if !format_str.is_empty() && !format_str.ends_with(' ') {
+                            format_str.push(' ');
+                        }
+                        format_str.push_str("{}");
+                    }
+
+                    quote! { #name_id!(#format_str, #( #rest_compiled ),*) }
                 } else {
                     let format_str = vec!["{}"; args_compiled.len()].join(" ");
                     quote! { #name_id!(#format_str, #( #args_compiled ),*) }
                 }
-            } else if name == "typeof" {
+            }
+ else if name == "typeof" {
                 let arg = &args_compiled[0];
                 quote! { std::any::type_name_of_val(#arg) }
             } else if name == "str" {

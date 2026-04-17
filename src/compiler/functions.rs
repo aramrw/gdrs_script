@@ -66,9 +66,11 @@ pub fn compile_function(
                 quote! { #p_name: &str }
             } else {
                 let p_ty = compile_type_ext(&p.ty, target_obj);
-                let mut_kw = if p.is_mutable { quote!(mut) } else { quote!() };
                 // ALL Solar function parameters are passed by reference in the generated Rust
-                if p.is_mutable {
+                // unless they are already references.
+                if matches!(p.ty, Type::Ref(_, _)) {
+                    quote!(#p_name: #p_ty)
+                } else if p.is_mutable {
                     quote!(#p_name: &mut #p_ty)
                 } else {
                     quote!(#p_name: &#p_ty)

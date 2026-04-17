@@ -499,6 +499,9 @@ pub(crate) fn generate_solar_std() -> TokenStream {
     impl crate::SolarAsVal<bool> for bool { fn as_val(&self) -> bool { *self } }
     impl crate::SolarAsVal<bool> for &bool { fn as_val(&self) -> bool { **self } }
 
+    impl crate::SolarAsVal<()> for () { fn as_val(&self) -> () { () } }
+    impl crate::SolarAsVal<()> for &() { fn as_val(&self) -> () { **self } }
+
     #[cfg(feature = "macroquad")]
     impl crate::SolarAsVal<::macroquad::math::Vec2> for ::macroquad::math::Vec2 { fn as_val(&self) -> ::macroquad::math::Vec2 { *self } }
     #[cfg(feature = "macroquad")]
