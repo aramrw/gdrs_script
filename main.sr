@@ -13,7 +13,7 @@ obj Triangle:
 fn add_vec2(vecs: Vec<Vec2>) -> Vec2:
     var sum = vecs.get(0).clone()
     var mut i = 1
-    while i < final.len():
+    while i < sum.len():
         var vec = vecs.get(i)
         sum.x = sum.x + vec.x
         sum.y = sum.y + vec.y

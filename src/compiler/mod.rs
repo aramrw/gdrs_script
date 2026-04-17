@@ -431,8 +431,8 @@ panic = "abort"
     fs::write(format!("{}/src/main.rs", project_dir), tokens.to_string())
         .expect("Failed to write src/main.rs");
 
-    println!("Compiling via Cargo...");
-    let mut args = vec!["build"];
+    println!("+=[Cargo]");
+    let mut args = vec!["build", "--message-format=short"];
     if has_macroquad {
         args.push("--features");
         args.push("macroquad");
@@ -444,7 +444,6 @@ panic = "abort"
         .expect("Failed to run cargo build");
 
     if status.success() {
-        println!("Compilation successful!");
         let src_binary = format!("{}/target/debug/solar_out", project_dir);
         let dst_binary = output_name;
         if let Err(e) = fs::copy(&src_binary, dst_binary) {
