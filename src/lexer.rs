@@ -9,7 +9,7 @@ pub type Span = SimpleSpan<usize>;
 #[derive(Clone, Debug, PartialEq)]
 pub enum Token {
     // Keywords
-    Fn, Var, Mut, Const, Box, If, Else, Print, Log, LogLn, Obj, Impl, Enum, Match, While, Return, Extern, SelfKw, Use, ResultKw, ErrorKw, Rust, Async, Await, Dependency, Any, As, Break, Loop,
+    Fn, Var, Mut, Const, Box, Rc, Arc, If, Else, Print, Log, LogLn, Obj, Impl, Enum, Match, While, Return, Extern, SelfKw, Use, ResultKw, ErrorKw, Rust, Async, Await, Dependency, Any, As, Break, Loop,
     // Types
     I32, I64, F32, F64, Bool, Str, StringKw, File,
     // Literals
@@ -17,7 +17,7 @@ pub enum Token {
     // Symbols
     Plus, Minus, Star, Div, Eq, DoubleEq, Amp, Colon, Arrow, Dot, Gt, Lt, QuestionMark, Bang,
     ParenOpen, ParenClose, BraceOpen, BraceClose, BracketOpen, BracketClose,
-    Comma, Semicolon, DoubleColon, FatArrow,
+    Comma, Semicolon, DoubleColon, FatArrow, Tilde,
     // Significant Whitespace
     Indent, Dedent,
     Attribute(String),
@@ -36,7 +36,9 @@ impl Token {
             Token::Var => "var".to_string(),
             Token::Mut => "mut".to_string(),
             Token::Const => "const".to_string(),
-            Token::Box => "Box".to_string(),
+            Token::Box => "box".to_string(),
+            Token::Rc => "rc".to_string(),
+            Token::Arc => "arc".to_string(),
             Token::If => "if".to_string(),
             Token::Else => "else".to_string(),
             Token::Print => "print".to_string(),
@@ -100,7 +102,8 @@ impl Token {
             Token::Semicolon => ";".to_string(),
             Token::DoubleColon => "::".to_string(),
             Token::FatArrow => "=>".to_string(),
-            Token::Indent => "".to_string(),
+            Token::Tilde => "~".to_string(),
+            Token::Indent => "<indent>".to_string(),
             Token::Dedent => "".to_string(),
             Token::Attribute(s) => format!("#[{}]", s),
         }
@@ -200,6 +203,7 @@ pub fn lex(source: &str) -> Result<Vec<(Token, Span)>, LexError> {
                 '.' => tokens.push((Token::Dot, span(1))),
                 '?' => tokens.push((Token::QuestionMark, span(1))),
                 '!' => tokens.push((Token::Bang, span(1))),
+                '~' => tokens.push((Token::Tilde, span(1))),
                 '-' => {
                     if chars.peek().map(|&(_, c)| c) == Some('>') { 
                         chars.next(); 
@@ -308,6 +312,8 @@ pub fn lex(source: &str) -> Result<Vec<(Token, Span)>, LexError> {
                         "mut" => tokens.push((Token::Mut, span)),
                         "const" => tokens.push((Token::Const, span)),
                         "box" => tokens.push((Token::Box, span)),
+                        "rc" => tokens.push((Token::Rc, span)),
+                        "arc" => tokens.push((Token::Arc, span)),
                         "if" => tokens.push((Token::If, span)),
                         "else" => tokens.push((Token::Else, span)),
                         "print" => tokens.push((Token::Print, span)),

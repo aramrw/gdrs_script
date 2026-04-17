@@ -8,6 +8,10 @@ pub enum Type {
     BoxPtr(Box<Type>),
     RawPtr(Box<Type>, bool),
     Ref(Box<Type>, bool),
+    Managed(Box<Type>),
+    ThreadSafe(Box<Type>),
+    WeakManaged(Box<Type>),
+    WeakThreadSafe(Box<Type>),
     Generic(String),
     Custom(String, Vec<Type>),
     SelfType,
@@ -23,13 +27,21 @@ pub enum BinaryOp {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AllocKind {
-    Box, RawMut, RawConst,
+    Box, RawMut, RawConst, Rc, Arc,
 }
 
 #[derive(Debug, Clone)]
 pub struct Expr {
     pub kind: ExprKind,
     pub span: Span,
+    pub ty: Option<Type>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ArgKind {
+    Value,
+    Ref,
+    MutRef,
 }
 
 #[derive(Debug, Clone)]
@@ -38,15 +50,16 @@ pub enum ExprKind {
     Int(i32), Int64(i64), Float(f32), Float64(f64), Bool(bool), String(String),
     Variable(String),
     Binary(Box<Expr>, BinaryOp, Box<Expr>),
-    Call(String, Vec<Expr>, Option<String>),
+    Call(String, Vec<Expr>, Option<String>, Option<Vec<ArgKind>>),
     MacroCall(String, Vec<Expr>),
-    MethodCall(Box<Expr>, String, Vec<Expr>, Option<String>),
+    MethodCall(Box<Expr>, String, Vec<Expr>, Option<String>, Option<Vec<ArgKind>>),
     StructLiteral { name: String, fields: Vec<(String, Expr)>, resolved_name: Option<String> },
     MemberAccess(Box<Expr>, String),
     IndexAccess(Box<Expr>, Box<Expr>),
     Alloc(Box<Expr>, AllocKind),
     Borrow(Box<Expr>, bool),
     Deref(Box<Expr>),
+    Downgrade(Box<Expr>),
     Negate(Box<Expr>),
     Unwrap(Box<Expr>),
     Await(Box<Expr>),

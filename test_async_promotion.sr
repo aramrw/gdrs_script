@@ -1,0 +1,25 @@
+obj Point:
+    x: i32
+    y: i32
+
+obj Sprite:
+    pos: **Point
+
+async fn sleep() -> Result<(), i32>:
+    return Ok(())
+
+async fn main():
+    var mut p = Point { x: 1, y: 2 }
+    
+    // Trigger promotion to *Point
+    var s = Sprite { pos: &p }
+    
+    println!("Before await, p.x = ", p.x)
+    
+    // This await should upgrade p to **Point because p is used after it
+    sleep().await
+    
+    p.x = 100
+    println!("After await, p.x = ", p.x)
+    
+    return Ok(())

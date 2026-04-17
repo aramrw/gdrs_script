@@ -1,0 +1,13 @@
+obj Point:
+    x: i32
+    y: i32
+
+fn move_player(p: &mut Point, q: &Point):
+    p.x = p.x + q.x
+
+fn main():
+    var p = *rc Point { x: 1, y: 2 }
+    // This should trigger a compile-time error
+    move_player(p, p)
+    
+    return Ok(())

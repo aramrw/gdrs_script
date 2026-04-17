@@ -163,6 +163,22 @@ fn compile_type(ty: &Type) -> TokenStream {
                 quote!(&#t)
             }
         }
+        Type::Managed(inner) => {
+            let t = compile_type(inner);
+            quote!(::std::rc::Rc<::std::cell::RefCell<#t>>)
+        }
+        Type::ThreadSafe(inner) => {
+            let t = compile_type(inner);
+            quote!(::std::sync::Arc<::parking_lot::RwLock<#t>>)
+        }
+        Type::WeakManaged(inner) => {
+            let t = compile_type(inner);
+            quote!(::std::rc::Weak<::std::cell::RefCell<#t>>)
+        }
+        Type::WeakThreadSafe(inner) => {
+            let t = compile_type(inner);
+            quote!(::std::sync::Weak<::parking_lot::RwLock<#t>>)
+        }
         Type::Generic(name) => {
             let id = quote::format_ident!("{}", name);
             quote!(#id)
@@ -203,11 +219,36 @@ fn compile_pattern(pat: &Pattern) -> TokenStream {
             let id = quote::format_ident!("{}", n);
             quote!(#id)
         }
-        Pattern::Literal(lit) => compile_expr(lit, None),
+        Pattern::Literal(lit) => compile_expr(lit, None, false),
     }
 }
 
-fn compile_expr(expr: &Expr, target_obj: Option<&String>) -> TokenStream {
+fn wrap_expr_for_ref(expr: &Expr, target_obj: Option<&String>, mutable: bool) -> TokenStream {
+    let tokens = compile_expr(expr, target_obj, mutable);
+    
+    if let Some(ty) = &expr.ty {
+        match ty {
+            Type::Managed(_) => {
+                if mutable { quote! { &mut *#tokens.borrow_mut() } }
+                else { quote! { &*#tokens.borrow() } }
+            }
+            Type::ThreadSafe(_) => {
+                if mutable { quote! { &mut *#tokens.write() } }
+                else { quote! { &*#tokens.read() } }
+            }
+            Type::Ref(_, _) => tokens, // Already a ref
+            _ => {
+                if mutable { quote! { &mut #tokens } }
+                else { quote! { &#tokens } }
+            }
+        }
+    } else {
+        if mutable { quote! { &mut #tokens } }
+        else { quote! { &#tokens } }
+    }
+}
+
+fn compile_expr(expr: &Expr, target_obj: Option<&String>, is_mut: bool) -> TokenStream {
     match &expr.kind {
         ExprKind::Unit => quote!(()),
         ExprKind::Int(v) => quote!(#v),
@@ -224,49 +265,50 @@ fn compile_expr(expr: &Expr, target_obj: Option<&String>) -> TokenStream {
             }
         }
         ExprKind::Binary(lhs, op, rhs) => {
-            let l = compile_expr(lhs, target_obj);
-            let r = compile_expr(rhs, target_obj);
+            let l = compile_expr(lhs, target_obj, is_mut);
+            let r = wrap_expr_for_ref(rhs, target_obj, false);
             match op {
                 BinaryOp::Add => {
-                    quote! { (#l).solar_add(&#r) }
+                    quote! { (#l).solar_add(#r) }
                 }
-                BinaryOp::Subtract => quote! { (#l).solar_sub(&#r) },
-                BinaryOp::Multiply => quote! { (#l).solar_mul(&#r) },
-                BinaryOp::Divide => quote! { (#l).solar_div(&#r) },
-                BinaryOp::GreaterThan => quote! { (#l).solar_gt(&#r) },
-                BinaryOp::LessThan => quote! { (#l).solar_lt(&#r) },
-                BinaryOp::Equal => quote! { (#l).solar_eq(&#r) },
+                BinaryOp::Subtract => quote! { (#l).solar_sub(#r) },
+                BinaryOp::Multiply => quote! { (#l).solar_mul(#r) },
+                BinaryOp::Divide => quote! { (#l).solar_div(#r) },
+                BinaryOp::GreaterThan => quote! { (#l).solar_gt(#r) },
+                BinaryOp::LessThan => quote! { (#l).solar_lt(#r) },
+                BinaryOp::Equal => quote! { (#l).solar_eq(#r) },
             }
         }
         ExprKind::MacroCall(name, args) => {
             let name_id = compile_id(name);
-            let args_compiled: Vec<_> = args.iter().map(|a| compile_expr(a, target_obj)).collect();
+            let args_compiled: Vec<_> = args.iter().map(|a| wrap_expr_for_ref(a, target_obj, false)).collect();
             if name == "println" || name == "print" {
                 let format_str = vec!["{}"; args_compiled.len()].join(" ");
-                quote! { #name_id!(#format_str, #( &#args_compiled ),*) }
+                quote! { #name_id!(#format_str, #( #args_compiled ),*) }
             } else if name == "typeof" {
                 let arg = &args_compiled[0];
-                quote! { std::any::type_name_of_val(&#arg) }
+                quote! { std::any::type_name_of_val(#arg) }
             } else {
-                quote! { #name_id!(#( #args_compiled ),*) }
+                let args_raw: Vec<_> = args.iter().map(|a| compile_expr(a, target_obj, false)).collect();
+                quote! { #name_id!(#( #args_raw ),*) }
             }
         }
-        ExprKind::Call(name, args, resolved_name) => {
+        ExprKind::Call(name, args, resolved_name, arg_kinds) => {
             if name == "Box" && args.len() == 1 {
-                let inner = compile_expr(&args[0], target_obj);
+                let inner = compile_expr(&args[0], target_obj, false);
                 return quote! { Box::new(#inner) };
             }
             if name == "Ok" || name == "Err" {
                 let id = compile_id(name);
                 let args = args.iter().map(|a| {
-                    let e = compile_expr(a, target_obj);
+                    let e = compile_expr(a, target_obj, false);
                     quote!(crate::SolarAsVal::as_val(&#e))
                 });
                 return quote! { #id(#( #args ),*) };
             }
             if name == "array_init" {
-                let element = compile_expr(&args[0], target_obj);
-                let size = compile_expr(&args[1], target_obj);
+                let element = compile_expr(&args[0], target_obj, false);
+                let size = compile_expr(&args[1], target_obj, false);
                 return quote! { unsafe {
                     let mut v: Vec<_> = (0..crate::SolarAsSize::as_size(&#size)).map(|_| crate::SolarAsVal::as_val(&#element)).collect();
                     let p = v.as_mut_ptr();
@@ -279,11 +321,21 @@ fn compile_expr(expr: &Expr, target_obj: Option<&String>) -> TokenStream {
             } else {
                 compile_id(name)
             };
-            let args = args.iter().map(|a| compile_expr(a, target_obj));
+            let args = args.iter().enumerate().map(|(i, a)| {
+                let kind = arg_kinds.as_ref().and_then(|ks| ks.get(i)).cloned().unwrap_or(ArgKind::Value);
+                match kind {
+                    ArgKind::Value => {
+                        let e = compile_expr(a, target_obj, false);
+                        quote!(crate::SolarAsVal::as_val(&#e))
+                    }
+                    ArgKind::Ref => wrap_expr_for_ref(a, target_obj, false),
+                    ArgKind::MutRef => wrap_expr_for_ref(a, target_obj, true),
+                }
+            });
             quote! { #id(#( #args ),*) }
         }
-        ExprKind::MethodCall(lhs, name, args, _resolved_obj_name) => {
-            let l = compile_expr(lhs, target_obj);
+        ExprKind::MethodCall(lhs, name, args, _resolved_obj_name, arg_kinds) => {
+            let l = compile_expr(lhs, target_obj, is_mut);
             let id = if let Some(obj) = _resolved_obj_name {
                 if obj == "vector"
                     || obj == "str"
@@ -300,21 +352,40 @@ fn compile_expr(expr: &Expr, target_obj: Option<&String>) -> TokenStream {
             } else {
                 quote::format_ident!("{}", name)
             };
-            let args = args.iter().map(|a| compile_expr(a, target_obj));
-            quote! { (#l).#id(#( &#args ),*) }
+            let args = args.iter().enumerate().map(|(i, a)| {
+                let kind = arg_kinds.as_ref().and_then(|ks| ks.get(i)).cloned().unwrap_or(ArgKind::Value);
+                match kind {
+                    ArgKind::Value => {
+                        let e = compile_expr(a, target_obj, false);
+                        quote!(crate::SolarAsVal::as_val(&#e))
+                    }
+                    ArgKind::Ref => wrap_expr_for_ref(a, target_obj, false),
+                    ArgKind::MutRef => wrap_expr_for_ref(a, target_obj, true),
+                }
+            });
+            quote! { (#l).#id(#( #args ),*) }
         }
         ExprKind::MemberAccess(lhs, name) => {
-            let l = compile_expr(lhs, target_obj);
+            let l = compile_expr(lhs, target_obj, is_mut);
             let id = quote::format_ident!("{}", name);
-            quote! { #l.#id }
+            
+            if let Some(Type::Managed(_)) = &lhs.ty {
+                if is_mut { quote! { (#l.borrow_mut()).#id } }
+                else { quote! { (#l.borrow()).#id } }
+            } else if let Some(Type::ThreadSafe(_)) = &lhs.ty {
+                if is_mut { quote! { (#l.write()).#id } }
+                else { quote! { (#l.read()).#id } }
+            } else {
+                quote! { #l.#id }
+            }
         }
         ExprKind::IndexAccess(lhs, index) => {
-            let l = compile_expr(lhs, target_obj);
-            let i = compile_expr(index, target_obj);
+            let l = compile_expr(lhs, target_obj, is_mut);
+            let i = compile_expr(index, target_obj, false);
             quote! { (#l).solar_index(crate::SolarAsVal::as_val(&#i)) }
         }
         ExprKind::Cast(inner, ty) => {
-            let e = compile_expr(inner, target_obj);
+            let e = compile_expr(inner, target_obj, false);
             let t = compile_type(ty);
             quote! { (crate::SolarAsVal::as_val(&#e) as #t) }
         }
@@ -337,21 +408,23 @@ fn compile_expr(expr: &Expr, target_obj: Option<&String>) -> TokenStream {
             let id = compile_id(&target_name);
             let fields = fields.iter().map(|(n, v)| {
                 let fname = quote::format_ident!("{}", n);
-                let fval = compile_expr(v, target_obj);
+                let fval = compile_expr(v, target_obj, false);
                 quote! { #fname: crate::SolarAsVal::as_val(&#fval) }
             });
             quote! { #id { #( #fields ),* } }
         }
         ExprKind::Alloc(inner, kind) => {
-            let e = compile_expr(inner, target_obj);
+            let e = compile_expr(inner, target_obj, false);
             match kind {
                 AllocKind::Box => quote! { Box::new(#e) },
                 AllocKind::RawMut => quote! { #e },
                 AllocKind::RawConst => quote! { #e },
+                AllocKind::Rc => quote! { ::std::rc::Rc::new(::std::cell::RefCell::new(#e)) },
+                AllocKind::Arc => quote! { ::std::sync::Arc::new(::parking_lot::RwLock::new(#e)) },
             }
         }
         ExprKind::Borrow(inner, mutable) => {
-            let e = compile_expr(inner, target_obj);
+            let e = compile_expr(inner, target_obj, *mutable);
             if *mutable {
                 quote! { &mut #e }
             } else {
@@ -359,19 +432,31 @@ fn compile_expr(expr: &Expr, target_obj: Option<&String>) -> TokenStream {
             }
         }
         ExprKind::Negate(inner) => {
-            let e = compile_expr(inner, target_obj);
+            let e = compile_expr(inner, target_obj, false);
             quote! { (-#e) }
         }
         ExprKind::Deref(inner) => {
-            let e = compile_expr(inner, target_obj);
+            let e = compile_expr(inner, target_obj, is_mut);
             quote! { (*#e) }
         }
+        ExprKind::Downgrade(inner) => {
+            let e = compile_expr(inner, target_obj, false);
+            if let Some(Type::Managed(_)) = &inner.ty {
+                quote! { ::std::rc::Rc::downgrade(&#e) }
+            } else {
+                quote! { ::std::sync::Arc::downgrade(&#e) }
+            }
+        }
         ExprKind::Unwrap(inner) => {
-            let e = compile_expr(inner, target_obj);
-            quote! { #e? }
+            let e = compile_expr(inner, target_obj, false);
+            if let Some(Type::WeakManaged(_)) | Some(Type::WeakThreadSafe(_)) = &inner.ty {
+                quote! { #e.upgrade() }
+            } else {
+                quote! { #e? }
+            }
         }
         ExprKind::Await(inner) => {
-            let e = compile_expr(inner, target_obj);
+            let e = compile_expr(inner, target_obj, false);
             quote! { #e.await }
         }
     }
@@ -382,29 +467,52 @@ fn compile_stmt(stmt: &Stmt, is_last: bool, target_obj: Option<&String>, expecte
         StmtKind::VarDecl {
             name,
             is_mutable,
-            ty,
+            ty: expected_ty,
             value,
         } => {
             let id = quote::format_ident!("{}", name);
             let mut_kw = if *is_mutable { quote!(mut) } else { quote!() };
-            let val = compile_expr(value, target_obj);
-            let ty_tokens = match ty {
-                Some(t) => {
-                    let ct = compile_type(t);
-                    quote!(: #ct)
-                }
-                None => quote!(),
+            
+            let val_raw = compile_expr(value, target_obj, false);
+            
+            // Check if variable was promoted (by looking at the type stored in the value expression)
+            // Wait, the VarDecl doesn't have a ty field itself for the final type, 
+            // but we can look at the value's type if it was updated, or better, 
+            // the expected_ty might have been updated by sema?
+            // Actually, in sema analyze_stmt, we don't update expected_ty.
+            // But we can check if the value was promoted.
+            
+            let final_ty = value.ty.as_ref();
+
+            let (ty_tokens, final_val) = if let Some(pt) = final_ty {
+                let ct = compile_type(pt);
+                let val_managed = match pt {
+                    Type::Managed(_) => quote! { ::std::rc::Rc::new(::std::cell::RefCell::new(#val_raw)) },
+                    Type::ThreadSafe(_) => quote! { ::std::sync::Arc::new(::parking_lot::RwLock::new(#val_raw)) },
+                    _ => val_raw,
+                };
+                (quote!(: #ct), val_managed)
+            } else {
+                let tt = match expected_ty {
+                    Some(t) => {
+                        let ct = compile_type(t);
+                        quote!(: #ct)
+                    }
+                    None => quote!(),
+                };
+                (tt, val_raw)
             };
-            quote! { let #mut_kw #id #ty_tokens = #val; }
+
+            quote! { let #mut_kw #id #ty_tokens = #final_val; }
         }
         StmtKind::Assign { target, value } => {
-            let v = compile_expr(value, target_obj);
+            let v = compile_expr(value, target_obj, false);
             if let ExprKind::IndexAccess(lhs, index) = &target.kind {
-                let l = compile_expr(lhs, target_obj);
-                let i = compile_expr(index, target_obj);
+                let l = compile_expr(lhs, target_obj, true);
+                let i = compile_expr(index, target_obj, false);
                 quote! { unsafe { *#l.add(crate::SolarAsSize::as_size(&#i)) = crate::SolarAsVal::as_val(&#v); } }
             } else {
-                let t = compile_expr(target, target_obj);
+                let t = compile_expr(target, target_obj, true);
                 quote! { #t = crate::SolarAsVal::as_val(&#v); }
             }
         }
@@ -416,7 +524,7 @@ fn compile_stmt(stmt: &Stmt, is_last: bool, target_obj: Option<&String>, expecte
             quote! { { #inner } }
         }
         StmtKind::ExprStmt(expr) => {
-            let e = compile_expr(expr, target_obj);
+            let e = compile_expr(expr, target_obj, false);
             if is_last {
                 match expected_ret {
                     Some(Type::Unit) | None => quote!(#e;),
@@ -431,7 +539,7 @@ fn compile_stmt(stmt: &Stmt, is_last: bool, target_obj: Option<&String>, expecte
             then_branch,
             else_branch,
         } => {
-            let cond = compile_expr(condition, target_obj);
+            let cond = compile_expr(condition, target_obj, false);
             let then = compile_stmt(then_branch, is_last, target_obj, expected_ret);
             if let Some(else_b) = else_branch {
                 let els = compile_stmt(else_b, is_last, target_obj, expected_ret);
@@ -441,7 +549,7 @@ fn compile_stmt(stmt: &Stmt, is_last: bool, target_obj: Option<&String>, expecte
             }
         }
         StmtKind::While { condition, body } => {
-            let cond = compile_expr(condition, target_obj);
+            let cond = compile_expr(condition, target_obj, false);
             let b = compile_stmt(body, false, target_obj, expected_ret);
             quote! { while #cond #b }
         }
@@ -450,7 +558,7 @@ fn compile_stmt(stmt: &Stmt, is_last: bool, target_obj: Option<&String>, expecte
             quote! { loop #b }
         }
         StmtKind::Break(expr) => {
-            let e = expr.as_ref().map(|e| compile_expr(e, target_obj));
+            let e = expr.as_ref().map(|e| compile_expr(e, target_obj, false));
             if let Some(tokens) = e {
                 quote! { break #tokens; }
             } else {
@@ -458,7 +566,7 @@ fn compile_stmt(stmt: &Stmt, is_last: bool, target_obj: Option<&String>, expecte
             }
         }
         StmtKind::Return(expr) => {
-            let e = expr.as_ref().map(|e| compile_expr(e, target_obj));
+            let e = expr.as_ref().map(|e| compile_expr(e, target_obj, false));
             if let Some(tokens) = e {
                 quote! { return #tokens; }
             } else {
@@ -466,7 +574,7 @@ fn compile_stmt(stmt: &Stmt, is_last: bool, target_obj: Option<&String>, expecte
             }
         }
         StmtKind::Match { expr, arms } => {
-            let e = compile_expr(expr, target_obj);
+            let e = compile_expr(expr, target_obj, false);
             let arm_tokens = arms.iter().map(|arm| {
                 let pat = compile_pattern(&arm.pattern);
                 let body = compile_stmt(&arm.body, is_last, target_obj, expected_ret);
@@ -1016,6 +1124,14 @@ pub fn compile(program: Program, output_name: &str) {
             fn as_val(&self) -> T { (*self).clone() }
         }
 
+        impl<T: Clone> SolarAsVal<T> for ::std::rc::Rc<::std::cell::RefCell<T>> {
+            fn as_val(&self) -> T { self.borrow().clone() }
+        }
+
+        impl<T: Clone> SolarAsVal<T> for ::std::sync::Arc<::parking_lot::RwLock<T>> {
+            fn as_val(&self) -> T { self.read().clone() }
+        }
+
         pub trait SolarAsSize {
             fn as_size(&self) -> usize;
         }
@@ -1129,6 +1245,7 @@ edition = "2021"
 
 [dependencies]
 mimalloc = "0.1"
+parking_lot = "0.12"
 "#,
     );
 
@@ -1258,7 +1375,7 @@ fn compile_decls(decls: &[Decl], tokens: &mut TokenStream) {
                     quote! { #[#attr] }
                 });
                 tokens.extend(
-                    quote! { #( #attrs )* #[derive(Clone, Debug, Default, PartialEq)] pub struct #name #gens { #( #fields ),* } },
+                    quote! { #( #attrs )* #[derive(Clone, Debug, Default)] pub struct #name #gens { #( #fields ),* } },
                 );
             }
             Decl::Enum(enm) => {
@@ -1282,7 +1399,7 @@ fn compile_decls(decls: &[Decl], tokens: &mut TokenStream) {
                     let attr = a.parse::<TokenStream>().expect("Failed to parse attribute");
                     quote! { #[#attr] }
                 });
-                tokens.extend(quote! { #( #attrs )* #[derive(Clone, Debug, PartialEq)] pub enum #name #gens { #( #variants ),* } });
+                tokens.extend(quote! { #( #attrs )* #[derive(Clone, Debug)] pub enum #name #gens { #( #variants ),* } });
             }
             Decl::ExternFunction(_) => {}
             Decl::ExternObject(obj) => {

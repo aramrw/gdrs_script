@@ -40,17 +40,24 @@ where
             .then(ty.clone())
             .map(|(mut_kw, inner)| Type::Ref(Box::new(inner), mut_kw.is_some()));
 
-        let ptr = just(Token::Star)
-            .ignore_then(choice((
-                just(Token::Box).to(AllocKind::Box),
-                just(Token::Mut).to(AllocKind::RawMut),
-                just(Token::Const).to(AllocKind::RawConst),
-            )))
-            .then(ty.clone())
-            .map(|(kind, inner)| match kind {
-                AllocKind::Box => Type::BoxPtr(Box::new(inner)),
-                _ => Type::RawPtr(Box::new(inner), matches!(kind, AllocKind::RawMut)),
-            });
+        let ptr = choice((
+             // Weak pointers: ~*T or ~**T
+            just(Token::Tilde)
+                .ignore_then(just(Token::Star))
+                .ignore_then(choice((
+                    just(Token::Star).ignore_then(ty.clone()).map(|inner| Type::WeakThreadSafe(Box::new(inner))),
+                    ty.clone().map(|inner| Type::WeakManaged(Box::new(inner))),
+                ))),
+            // Pointers starting with *: *T, **T, *mut T, *const T, *box T
+            just(Token::Star)
+                .ignore_then(choice((
+                    just(Token::Box).ignore_then(ty.clone()).map(|inner| Type::BoxPtr(Box::new(inner))),
+                    just(Token::Mut).ignore_then(ty.clone()).map(|inner| Type::RawPtr(Box::new(inner), true)),
+                    just(Token::Const).ignore_then(ty.clone()).map(|inner| Type::RawPtr(Box::new(inner), false)),
+                    just(Token::Star).ignore_then(ty.clone()).map(|inner| Type::ThreadSafe(Box::new(inner))),
+                    ty.clone().map(|inner| Type::Managed(Box::new(inner))),
+                )))
+        ));
 
         let array = ty.clone()
             .then_ignore(just(Token::Semicolon))
@@ -107,22 +114,28 @@ where
                 }),
             just(Token::SelfKw).to(ExprKind::Variable("self".to_string())),
         ))
-        .map_with(|kind, e| Expr { kind, span: e.span() });
+        .map_with(|kind, e| Expr { kind, span: e.span(), ty: None });
 
         let alloc_or_deref = just(Token::Star)
             .ignore_then(choice((
                 just(Token::Box).to(AllocKind::Box).then(expr.clone()).map(|(_, e)| ExprKind::Alloc(Box::new(e), AllocKind::Box)),
                 just(Token::Mut).to(AllocKind::RawMut).then(expr.clone()).map(|(_, e)| ExprKind::Alloc(Box::new(e), AllocKind::RawMut)),
                 just(Token::Const).to(AllocKind::RawConst).then(expr.clone()).map(|(_, e)| ExprKind::Alloc(Box::new(e), AllocKind::RawConst)),
+                just(Token::Rc).to(AllocKind::Rc).then(expr.clone()).map(|(_, e)| ExprKind::Alloc(Box::new(e), AllocKind::Rc)),
+                just(Token::Arc).to(AllocKind::Arc).then(expr.clone()).map(|(_, e)| ExprKind::Alloc(Box::new(e), AllocKind::Arc)),
                 expr.clone().map(|e| ExprKind::Deref(Box::new(e))),
             )))
-            .map_with(|kind, e| Expr { kind, span: e.span() });
+            .map_with(|kind, e| Expr { kind, span: e.span(), ty: None });
+
+        let downgrade = just(Token::Tilde)
+            .ignore_then(expr.clone())
+            .map_with(|e, extr| Expr { kind: ExprKind::Downgrade(Box::new(e)), span: extr.span(), ty: None });
 
         let array_init = expr.clone()
             .then_ignore(just(Token::Semicolon))
             .then(expr.clone())
             .delimited_by(just(Token::BracketOpen), just(Token::BracketClose))
-            .map_with(|(v, s), e| Expr { kind: ExprKind::Call("array_init".to_string(), vec![v, s], None), span: e.span() });
+            .map_with(|(v, s), e| Expr { kind: ExprKind::Call("array_init".to_string(), vec![v, s], None, None), span: e.span(), ty: None });
 
         let struct_literal = select! { Token::Ident(name) => name }
             .then(just(Token::DoubleColon).ignore_then(select! { Token::Ident(name) => name }).repeated().collect::<Vec<_>>())
@@ -138,21 +151,21 @@ where
             .then(
                 select! { Token::Ident(name) => name }
                     .then(just(Token::Colon).ignore_then(expr.clone()).or_not())
-                    .map_with(|(name, val), e| (name.clone(), val.unwrap_or(Expr { kind: ExprKind::Variable(name), span: e.span() })))
+                    .map_with(|(name, val), e| (name.clone(), val.unwrap_or(Expr { kind: ExprKind::Variable(name), span: e.span(), ty: None })))
                     .separated_by(just(Token::Comma))
                     .collect::<Vec<_>>()
                     .delimited_by(just(Token::BraceOpen), just(Token::BraceClose))
             )
-            .map_with(|(name, fields), e| Expr { kind: ExprKind::StructLiteral { name, fields, resolved_name: None }, span: e.span() });
+            .map_with(|(name, fields), e| Expr { kind: ExprKind::StructLiteral { name, fields, resolved_name: None }, span: e.span(), ty: None });
 
         let borrow = just(Token::Amp)
             .ignore_then(just(Token::Mut).or_not())
             .then(expr.clone())
-            .map_with(|(mut_kw, e), extr| Expr { kind: ExprKind::Borrow(Box::new(e), mut_kw.is_some()), span: extr.span() });
+            .map_with(|(mut_kw, e), extr| Expr { kind: ExprKind::Borrow(Box::new(e), mut_kw.is_some()), span: extr.span(), ty: None });
 
         let negate = just(Token::Minus)
             .ignore_then(expr.clone())
-            .map_with(|e, extr| Expr { kind: ExprKind::Negate(Box::new(e)), span: extr.span() });
+            .map_with(|e, extr| Expr { kind: ExprKind::Negate(Box::new(e)), span: extr.span(), ty: None });
 
         let call = any_name.clone()
             .then(just(Token::DoubleColon).ignore_then(any_name.clone()).repeated().collect::<Vec<_>>())
@@ -167,12 +180,12 @@ where
             .then(just(Token::Bang).or_not())
             .then(expr.clone().separated_by(just(Token::Comma)).collect::<Vec<_>>().delimited_by(just(Token::ParenOpen), just(Token::ParenClose)))
             .map_with(|((name, bang), args), e| if bang.is_some() { 
-                Expr { kind: ExprKind::MacroCall(name, args), span: e.span() }
+                Expr { kind: ExprKind::MacroCall(name, args), span: e.span(), ty: None }
             } else { 
-                Expr { kind: ExprKind::Call(name, args, None), span: e.span() }
+                Expr { kind: ExprKind::Call(name, args, None, None), span: e.span(), ty: None }
             });
 
-        let term = choice((struct_literal, call, borrow, negate, alloc_or_deref, array_init, val, expr.clone().delimited_by(just(Token::ParenOpen), just(Token::ParenClose))));
+        let term = choice((struct_literal, call, borrow, negate, alloc_or_deref, downgrade, array_init, val, expr.clone().delimited_by(just(Token::ParenOpen), just(Token::ParenClose))));
 
         let suffix = choice((
             just(Token::Dot).ignore_then(select! { Token::Ident(name) => name })
@@ -187,12 +200,12 @@ where
 
         let atom = term.clone().foldl(suffix.repeated(), |lhs, (name, args, index, unwrap, is_await, cast): (String, Option<Vec<Expr>>, Option<Expr>, bool, bool, Option<Type>)| {
             let span = lhs.span; // Heuristic, might need better span merging
-            if let Some(ty) = cast { Expr { kind: ExprKind::Cast(Box::new(lhs), ty), span } }
-            else if is_await { Expr { kind: ExprKind::Await(Box::new(lhs)), span } }
-            else if unwrap { Expr { kind: ExprKind::Unwrap(Box::new(lhs)), span } }
-            else if let Some(idx) = index { Expr { kind: ExprKind::IndexAccess(Box::new(lhs), Box::new(idx)), span } }
-            else if let Some(arguments) = args { Expr { kind: ExprKind::MethodCall(Box::new(lhs), name, arguments, None), span } }
-            else { Expr { kind: ExprKind::MemberAccess(Box::new(lhs), name), span } }
+            if let Some(ty) = cast { Expr { kind: ExprKind::Cast(Box::new(lhs), ty), span, ty: None } }
+            else if is_await { Expr { kind: ExprKind::Await(Box::new(lhs)), span, ty: None } }
+            else if unwrap { Expr { kind: ExprKind::Unwrap(Box::new(lhs)), span, ty: None } }
+            else if let Some(idx) = index { Expr { kind: ExprKind::IndexAccess(Box::new(lhs), Box::new(idx)), span, ty: None } }
+            else if let Some(arguments) = args { Expr { kind: ExprKind::MethodCall(Box::new(lhs), name, arguments, None, None), span, ty: None } }
+            else { Expr { kind: ExprKind::MemberAccess(Box::new(lhs), name), span, ty: None } }
         });
 
         let mul_op = just(Token::Star).to(BinaryOp::Multiply).or(just(Token::Div).to(BinaryOp::Divide));
@@ -201,17 +214,17 @@ where
 
         let product = atom.clone().foldl(mul_op.then(atom).repeated(), |lhs, (op, rhs)| {
             let span = lhs.span;
-            Expr { kind: ExprKind::Binary(Box::new(lhs), op, Box::new(rhs)), span }
+            Expr { kind: ExprKind::Binary(Box::new(lhs), op, Box::new(rhs)), span, ty: None }
         });
 
         let sum = product.clone().foldl(add_op.then(product).repeated(), |lhs, (op, rhs)| {
             let span = lhs.span;
-            Expr { kind: ExprKind::Binary(Box::new(lhs), op, Box::new(rhs)), span }
+            Expr { kind: ExprKind::Binary(Box::new(lhs), op, Box::new(rhs)), span, ty: None }
         });
 
         sum.clone().foldl(cmp_op.then(sum).repeated(), |lhs, (op, rhs)| {
             let span = lhs.span;
-            Expr { kind: ExprKind::Binary(Box::new(lhs), op, Box::new(rhs)), span }
+            Expr { kind: ExprKind::Binary(Box::new(lhs), op, Box::new(rhs)), span, ty: None }
         })
     })
 }
@@ -241,6 +254,8 @@ where
                 just(Token::Mut).to(AllocKind::RawMut),
                 just(Token::Const).to(AllocKind::RawConst),
                 just(Token::Box).to(AllocKind::Box),
+                just(Token::Rc).to(AllocKind::Rc),
+                just(Token::Arc).to(AllocKind::Arc),
             )))
             .then(select! { Token::Ident(name) => name })
             .then_ignore(just(Token::Eq).or(just(Token::Colon)))
@@ -249,9 +264,9 @@ where
             .map_with(|((kind, name), value), e| Stmt {
                 kind: StmtKind::VarDecl {
                     name, 
-                    is_mutable: match kind { AllocKind::RawMut | AllocKind::Box => true, _ => false },
+                    is_mutable: match kind { AllocKind::RawMut | AllocKind::Box | AllocKind::Rc | AllocKind::Arc => true, _ => false },
                     ty: None, 
-                    value: Expr { kind: ExprKind::Alloc(Box::new(value), kind), span: e.span() }
+                    value: Expr { kind: ExprKind::Alloc(Box::new(value), kind), span: e.span(), ty: None }
                 },
                 span: e.span()
             });
