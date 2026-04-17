@@ -176,6 +176,7 @@ impl SemanticAnalyzer {
         // Built-in string methods
         self.functions.insert("str::to_owned_string".to_string(), (vec![Type::Str], Some(Type::String)));
         self.functions.insert("str::to_string".to_string(), (vec![Type::Str], Some(Type::String)));
+        self.functions.insert("str::to_str".to_string(), (vec![Type::Str], Some(Type::Str)));
         self.functions.insert("str::len".to_string(), (vec![Type::Str], Some(Type::I32)));
         self.functions.insert("str::contains".to_string(), (vec![Type::Str, Type::Str], Some(Type::Bool)));
         self.functions.insert("str::split".to_string(), (vec![Type::Str, Type::Str], Some(Type::Array(Box::new(Type::String), 0))));
@@ -185,6 +186,8 @@ impl SemanticAnalyzer {
         self.functions.insert("string::len".to_string(), (vec![Type::String], Some(Type::I32)));
         self.functions.insert("string::contains".to_string(), (vec![Type::String, Type::Str], Some(Type::Bool)));
         self.functions.insert("string::as_str".to_string(), (vec![Type::String], Some(Type::Str)));
+        self.functions.insert("string::to_str".to_string(), (vec![Type::String], Some(Type::Str)));
+        self.functions.insert("string::to_string".to_string(), (vec![Type::String], Some(Type::String)));
         self.functions.insert("string::lines".to_string(), (vec![Type::String], Some(Type::Array(Box::new(Type::String), 0))));
         self.functions.insert("string::split".to_string(), (vec![Type::String, Type::Str], Some(Type::Array(Box::new(Type::String), 0))));
 

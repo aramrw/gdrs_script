@@ -258,8 +258,15 @@ pub fn lex(source: &str) -> Result<Vec<(Token, Span)>, LexError> {
                     while let Some(&(_, nc)) = chars.peek() {
                         if nc.is_ascii_digit() { s.push(chars.next().unwrap().1); }
                         else if nc == '.' && !is_float { 
-                            is_float = true; 
-                            s.push(chars.next().unwrap().1); 
+                            // Peek at what's AFTER the dot
+                            let mut peek_chars = chars.clone();
+                            peek_chars.next(); // consume the dot
+                            if peek_chars.peek().map(|&(_, c)| c.is_ascii_digit()).unwrap_or(false) {
+                                is_float = true; 
+                                s.push(chars.next().unwrap().1); 
+                            } else {
+                                break;
+                            }
                         }
                         else { break; }
                     }

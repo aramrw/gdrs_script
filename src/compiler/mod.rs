@@ -145,7 +145,11 @@ fn compile_type(ty: &Type) -> TokenStream {
         }
         Type::Array(inner, size) => {
             let t = compile_type(inner);
-            quote!([#t; #size])
+            if *size == 0 {
+                quote!(Vec<#t>)
+            } else {
+                quote!([#t; #size])
+            }
         }
         Type::RawPtr(inner, mutable) => {
             let t = compile_type(inner);
@@ -767,6 +771,7 @@ pub fn compile(program: Program, output_name: &str) {
         pub trait SolarStr {
             fn to_owned_string(&self) -> String;
             fn solar_to_string(&self) -> String;
+            fn solar_to_str(&self) -> &str;
             fn solar_len(&self) -> i32;
             fn solar_contains(&self, s: impl AsRef<str>) -> bool;
             fn solar_split(&self, s: impl AsRef<str>) -> Vec<String>;
@@ -775,6 +780,7 @@ pub fn compile(program: Program, output_name: &str) {
         impl SolarStr for str {
             fn to_owned_string(&self) -> String { self.to_owned() }
             fn solar_to_string(&self) -> String { self.to_owned() }
+            fn solar_to_str(&self) -> &str { self }
             fn solar_len(&self) -> i32 { self.len() as i32 }
             fn solar_contains(&self, s: impl AsRef<str>) -> bool { self.contains(s.as_ref()) }
             fn solar_split(&self, s: impl AsRef<str>) -> Vec<String> { self.split(s.as_ref()).map(|x| x.to_owned()).collect() }
@@ -784,7 +790,9 @@ pub fn compile(program: Program, output_name: &str) {
             fn solar_append(&mut self, s: impl AsRef<str>);
             fn solar_len(&self) -> i32;
             fn solar_contains(&self, s: impl AsRef<str>) -> bool;
-            fn as_str(&self) -> &str;
+            fn solar_as_str(&self) -> &str;
+            fn solar_to_str(&self) -> &str;
+            fn solar_to_string(&self) -> String;
             fn solar_lines(&self) -> Vec<String>;
             fn solar_split(&self, s: impl AsRef<str>) -> Vec<String>;
         }
@@ -793,7 +801,9 @@ pub fn compile(program: Program, output_name: &str) {
             fn solar_append(&mut self, s: impl AsRef<str>) { self.push_str(s.as_ref()); }
             fn solar_len(&self) -> i32 { self.len() as i32 }
             fn solar_contains(&self, s: impl AsRef<str>) -> bool { self.contains(s.as_ref()) }
-            fn as_str(&self) -> &str { self.as_str() }
+            fn solar_as_str(&self) -> &str { self.as_str() }
+            fn solar_to_str(&self) -> &str { self.as_str() }
+            fn solar_to_string(&self) -> String { self.clone() }
             fn solar_lines(&self) -> Vec<String> { self.lines().map(|x| x.to_owned()).collect() }
             fn solar_split(&self, s: impl AsRef<str>) -> Vec<String> { self.split(s.as_ref()).map(|x| x.to_owned()).collect() }
         }

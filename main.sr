@@ -1,67 +1,27 @@
 rust dependency macroquad = "0.4"
-
 use crate::macroquad::prelude::*;
 use crate::macroquad::math::Vec2
-use std::math
 
-obj Triangle:
-    a: Vec2
-    b: Vec2
-    c: Vec2
+obj Circle:
+	r: f32
+	pos: Vec2
 
-impl Triangle:
-    fn draw_points(&self):
-        // changing it to &*self compiles xD
-        var t = &*self;
-        draw_circle(t.a.x, t.a.y, 15.0, GREEN)
-        draw_circle(t.b.x, t.b.y, 15.0, BLUE)
-        draw_circle(t.c.x, t.c.y, 15.0, RED)
+impl Circle:
+	fn new(pos: Vec2, r: f32) -> Self:
+		Self { pos, r }
+		
+	fn draw(&self):
+		var pos = &self.pos;
+		draw_circle(pos.x, pos.y, self.r, RED);
+		
 
-    fn draw_lines(&self):
-        draw_line(self.a.x, self.a.y, self.b.x, self.b.y, 20.0, SKYBLUE)
-        draw_text("A", self.a.x, self.a.y, 50.0, PINK)
-        draw_text("B", self.b.x, self.b.y, 50.0, VIOLET)
-        draw_text("C", self.c.x, self.c.y, 50.0, MAGENTA)
-
-        // draw hypotenuse
-        var a_b_side = TriangleSide { p1: self.a, p2: self.b }
-        var a_b_distance = a_b_side.distance_formula()
-        var midpoint = a_b_side.midpoint_formula()
-        draw_text(&a_b_distance.to_string(), midpoint.x, midpoint.y, 30.0, SKYBLUE)
-
-
-obj TriangleSide:
-    p1: Vec2
-    p2: Vec2
-
-impl TriangleSide:
-    fn distance_formula(&self) -> f32:
-        var xs = (self.p2.x - self.p1.x).powi(2)
-        var ys = (self.p2.y - self.p1.y).powi(2)
-        var d = (xs + ys).sqrt()
-        d
-
-    fn midpoint_formula(&self) -> Vec2:
-        var xs = (self.p2.x + self.p1.x) / 2.0
-        var ys = (self.p2.y + self.p1.y) / 2.0
-        vec2(xs, ys)
-
-async fn gameloop(t: Triangle):
-    while true:
-        clear_background(BLACK)
-        t.draw_points()
-        t.draw_lines()
-
-        // draw the triangle
-        draw_triangle(t.a, t.b, t.c, WHITE)
-        next_frame().await
 
 #[macroquad::main("window")]
 async fn main():
-    var t = Triangle { 
-		a: vec2(200.0, 500.0),
-		b: vec2(300.0, 50.0),
-		c: vec2(120.0, 90.0)
-	}
-	
-	gameloop(t).await
+	var circle = Circle::new(vec2(250.0, 200.0), 25.0)
+	*const c_ptr = circle as *const Circle
+
+	loop:
+		clear_background(BLACK)
+		circle.draw()
+		next_frame().await

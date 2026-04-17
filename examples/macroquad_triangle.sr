@@ -25,8 +25,15 @@ impl Triangle:
 
         // draw hypotenuse
         var a_b_side = TriangleSide { p1: self.a, p2: self.b }
+        var a_b_distance = a_b_side.distance_formula()
         var midpoint = a_b_side.midpoint_formula()
-        draw_text("Hypotenuse", midpoint.x, midpoint.y, 30.0, SKYBLUE)
+        draw_text(a_b_distance.to_string().to_str(), midpoint.x + 20.0, midpoint.y, 30.0, SKYBLUE)
+        
+        var b_c_side = TriangleSide { p1: self.b, p2: self.c }
+        var b_c_distance = b_c_side.distance_formula()
+        var midpoint = b_c_side.midpoint_formula()
+        draw_text(b_c_distance.to_string().to_str(), midpoint.x - 40.0, midpoint.y - 20.0, 30.0, SKYBLUE)
+
 
 
 obj TriangleSide:
