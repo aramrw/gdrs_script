@@ -219,6 +219,11 @@ impl SemanticAnalyzer {
                 Decl::Use(u) => {
                     if u.is_crate {
                         self.phantom_types.insert(u.path[0].clone());
+                        if !u.path.is_empty() {
+                            let full_path = u.path.join("::");
+                            let last = u.path.last().unwrap();
+                            self.aliases.insert(last.clone(), full_path);
+                        }
                     } else if !u.path.is_empty() {
                         let full_path = u.path.join("::");
                         let last = u.path.last().unwrap();
@@ -408,6 +413,28 @@ impl SemanticAnalyzer {
         }
     }
 
+    fn deref_type(&mut self, ty: &Type) -> Type {
+        match ty {
+            Type::BoxPtr(inner) |
+            Type::RawPtr(inner, _) |
+            Type::Ref(inner, _) |
+            Type::Managed(inner) |
+            Type::ThreadSafe(inner) |
+            Type::WeakManaged(inner) |
+            Type::WeakThreadSafe(inner) => self.deref_type(inner),
+            _ => ty.clone(),
+        }
+    }
+
+    fn is_phantom_type(&self, name: &str) -> bool {
+        if self.has_wildcard_phantom { return true; }
+        if self.phantom_types.contains(name) { return true; }
+        for p in &self.phantom_types {
+            if name.starts_with(&format!("{}::", p)) { return true; }
+        }
+        false
+    }
+
     fn analyze_function(&mut self, func: &mut Function, target: Option<&String>, target_generics: Option<&Vec<(String, Vec<String>)>>) -> Result<(), CompilerError> {
         self.symbols.clear();
         self.var_declarations.clear();
@@ -467,6 +494,7 @@ impl SemanticAnalyzer {
     fn types_equal(&self, a: &Type, b: &Type) -> bool {
         match (a, b) {
             (Type::Any, _) | (_, Type::Any) => true,
+            (Type::Str, Type::String) | (Type::String, Type::Str) => true,
             (Type::BoxPtr(a), Type::BoxPtr(b)) => self.types_equal(a, b),
             (Type::RawPtr(a, m1), Type::RawPtr(b, m2)) => m1 == m2 && self.types_equal(a, b),
             (Type::Ref(a, m1), Type::Ref(b, m2)) => m1 == m2 && self.types_equal(a, b),
@@ -818,6 +846,8 @@ impl SemanticAnalyzer {
                 }
                 if name == "typeof" {
                     Ok(Type::Str)
+                } else if name == "str" {
+                    Ok(Type::String) // str!() returns owned string by default
                 } else {
                     Ok(Type::I32) // Macros return i32/Unit effectively for now
                 }
@@ -868,11 +898,15 @@ impl SemanticAnalyzer {
                         if is_phantom {
                             for arg in args.iter_mut() { self.analyze_expr(arg)?; }
                             *resolved_name = Some(name.clone());
-                            return Ok(Type::Any);
+                            let ty = Type::Any;
+                            expr.ty = Some(ty.clone());
+                            return Ok(ty);
                         } else if self.has_wildcard_phantom {
                             for arg in args.iter_mut() { self.analyze_expr(arg)?; }
                             *resolved_name = Some(name.clone());
-                            return Ok(Type::Any);
+                            let ty = Type::Any;
+                            expr.ty = Some(ty.clone());
+                            return Ok(ty);
                         }
                         return self.semantic_error(format!("Undeclared function or variant '{}'", name), span);
                     };
@@ -940,34 +974,24 @@ impl SemanticAnalyzer {
                 } else if name == "clone" {
                     Ok(lhs_ty)
                 } else {
+                    let actual_ty = self.deref_type(&lhs_ty);
                     let (obj_name, _is_array) = match &lhs_ty {
-                        Type::Str => ("str".to_string(), false),
-                        Type::String => ("string".to_string(), false),
-                        Type::I32 => ("i32".to_string(), false),
-                        Type::I64 => ("i64".to_string(), false),
-                        Type::F32 => ("f32".to_string(), false),
-                        Type::F64 => ("f64".to_string(), false),
-                        Type::Array(_, _) => ("vector".to_string(), true),
-                        Type::Custom(n, _) => (n.clone(), false),
-                        Type::Generic(n) => {
-                            if let Some(bounds) = self.generic_params.get(n) {
-                                let mut found = None;
-                                for b in bounds {
-                                    if let Some(tr) = self.traits.get(b) {
-                                        if tr.functions.contains_key(name) {
-                                            found = Some(b.clone());
-                                            break;
-                                        }
-                                    }
-                                }
-                                if let Some(tr_name) = found { (tr_name, false) }
-                                else { return self.semantic_error(format!("No method '{}' found in bounds of generic type '{}'", name, n), span); }
-                            } else {
-                                return self.semantic_error(format!("No method '{}' on generic type '{}' with no bounds", name, n), span);
-                            }
+                        Type::RawPtr(_, _) => {
+                             // Allow arbitrary methods on raw pointers (like .add) for now
+                             // We'll treat them as Any to bypass checks
+                             for arg in args.iter_mut() { self.analyze_expr(arg)?; }
+                             *resolved_obj_name = Some("rawptr".to_string());
+                             return Ok(Type::Any);
                         }
-                        Type::Managed(inner) | Type::ThreadSafe(inner) | Type::WeakManaged(inner) | Type::WeakThreadSafe(inner) | Type::Ref(inner, _) | Type::BoxPtr(inner) => {
-                            match &**inner {
+                        _ => {
+                            match &actual_ty {
+                                Type::Str => ("str".to_string(), false),
+                                Type::String => ("string".to_string(), false),
+                                Type::I32 => ("i32".to_string(), false),
+                                Type::I64 => ("i64".to_string(), false),
+                                Type::F32 => ("f32".to_string(), false),
+                                Type::F64 => ("f64".to_string(), false),
+                                Type::Array(_, _) => ("vector".to_string(), true),
                                 Type::Custom(n, _) => (n.clone(), false),
                                 Type::Generic(n) => {
                                     if let Some(bounds) = self.generic_params.get(n) {
@@ -989,21 +1013,15 @@ impl SemanticAnalyzer {
                                 _ => return self.semantic_error(format!("Method call '{}' on non-object type {:?}", name, lhs_ty), span),
                             }
                         }
-                        Type::RawPtr(_, _) => {
-                             // Allow arbitrary methods on raw pointers (like .add) for now
-                             // We'll treat them as Any to bypass checks
-                             for arg in args.iter_mut() { self.analyze_expr(arg)?; }
-                             *resolved_obj_name = Some("rawptr".to_string());
-                             return Ok(Type::Any);
-                        }
-                        _ => return self.semantic_error(format!("Method call '{}' on non-object type {:?}", name, lhs_ty), span),
                     };
                     
                     *resolved_obj_name = Some(obj_name.clone());
 
-                    if self.phantom_types.contains(&obj_name) {
+                    if self.is_phantom_type(&obj_name) {
                         for arg in args.iter_mut() { self.analyze_expr(arg)?; }
-                        return Ok(Type::Any);
+                        let ty = Type::Any;
+                        expr.ty = Some(ty.clone());
+                        return Ok(ty);
                     }
 
                     let full_name = format!("{}::{}", obj_name, name);
@@ -1016,11 +1034,8 @@ impl SemanticAnalyzer {
                     if let Some((param_types, ret_type)) = self.functions.get(&full_name).cloned() {
                         let mut aks = Vec::new();
                         let mut start_idx = 0;
-                        if let Some(first) = param_types.first() {
+                        if let Some(_first) = param_types.first() {
                             // If it's a method call, we might need to skip 'self' in param_types
-                            // But how do we know if it was registered with 'self'?
-                            // In collect_impls, we always include all params including 'self'.
-                            // MethodCall arguments in AST do NOT include self.
                             start_idx = 1;
                         }
                         for pt in &param_types[start_idx..] {
@@ -1030,7 +1045,8 @@ impl SemanticAnalyzer {
                                 _ => ArgKind::Value,
                             });
                         }
-                        *arg_kinds = Some(aks.clone());                        self.check_aliasing(args, &aks, span)?;
+                        *arg_kinds = Some(aks.clone());
+                        self.check_aliasing(args, &aks, span)?;
 
                         let mut rt = ret_type.unwrap_or(Type::I32);
                         
@@ -1043,7 +1059,7 @@ impl SemanticAnalyzer {
                         if let Some((_, obj_gens)) = self.objects.get(&lookup_name) {
                             if !obj_gens.is_empty() {
                                 let mut inferred = vec![Type::Any; obj_gens.len()];
-                                if let Type::Custom(_, lhs_gens) = &lhs_ty {
+                                if let Type::Custom(_, lhs_gens) = &actual_ty {
                                     for (i, g) in lhs_gens.iter().enumerate() {
                                         if i < inferred.len() { inferred[i] = g.clone(); }
                                     }
@@ -1061,7 +1077,7 @@ impl SemanticAnalyzer {
                         }
 
                         if let Type::Generic(_) = rt {
-                            if let Type::Array(inner, _) = lhs_ty { Ok(*inner) }
+                            if let Type::Array(inner, _) = actual_ty { Ok(*inner) }
                             else { Ok(rt) }
                         } else { Ok(rt) }
                     } else {
@@ -1075,7 +1091,9 @@ impl SemanticAnalyzer {
                 if is_phantom || self.has_wildcard_phantom {
                     for (_, fexpr) in fields { self.analyze_expr(fexpr)?; }
                     *resolved_name = Some(name.clone());
-                    return Ok(Type::Any);
+                    let ty = Type::Any;
+                    expr.ty = Some(ty.clone());
+                    return Ok(ty);
                 }
 
                 let mut target_name = name.clone();
@@ -1143,16 +1161,10 @@ impl SemanticAnalyzer {
                 if lhs_ty == Type::Any { 
                     Ok(Type::Any) 
                 } else {
-                    let actual_ty = match lhs_ty {
-                        Type::BoxPtr(inner) => *inner,
-                        Type::RawPtr(inner, _) => *inner,
-                        Type::Ref(inner, _) => *inner,
-                        Type::Managed(inner) => *inner,
-                        Type::ThreadSafe(inner) => *inner,
-                        _ => lhs_ty,
-                    };
+                    let resolved_lhs = self.resolve_type(&lhs_ty);
+                    let actual_ty = self.deref_type(&resolved_lhs);
                     if let Type::Custom(ref obj_name, ref actual_gens) = actual_ty {
-                        if self.phantom_types.contains(obj_name) {
+                        if self.is_phantom_type(obj_name) {
                             Ok(Type::Any)
                         } else {
                             let mut lookup_name = obj_name.clone();

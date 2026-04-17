@@ -415,12 +415,20 @@ fn compile_expr(expr: &Expr, target_obj: Option<&String>, is_mut: bool) -> Token
             } else if name == "typeof" {
                 let arg = &args_compiled[0];
                 quote! { std::any::type_name_of_val(#arg) }
+            } else if name == "str" {
+                if args.is_empty() {
+                    quote! { ::std::string::String::new() }
+                } else {
+                    let arg = compile_expr(&args[0], target_obj, false);
+                    quote! { (&#arg).as_val() }
+                }
             } else {
                 let args_raw: Vec<_> = args.iter().map(|a| compile_expr(a, target_obj, false)).collect();
                 quote! { #name_id!(#( #args_raw ),*) }
             }
         }
         ExprKind::Call(name, args, resolved_name, arg_kinds) => {
+            let is_phantom = matches!(expr.ty, Some(Type::Any));
             let simple_name = path_to_string(name);
             if simple_name == "Box" && args.len() == 1 {
                 let inner = compile_expr(&args[0], target_obj, false);
@@ -434,7 +442,7 @@ fn compile_expr(expr: &Expr, target_obj: Option<&String>, is_mut: bool) -> Token
                 };
                 let args = args.iter().map(|a| {
                     let e = compile_expr(a, target_obj, false);
-                    quote!(crate::SolarAsVal::as_val(&#e))
+                    quote!((&#e).as_val())
                 });
                 return quote! { #id(#( #args ),*) };
             }
@@ -444,7 +452,7 @@ fn compile_expr(expr: &Expr, target_obj: Option<&String>, is_mut: bool) -> Token
                 // The element's type in Solar is T, so we want *mut T in Rust
                 let ty = compile_type_ext(args[0].ty.as_ref().unwrap_or(&Type::I32), target_obj);
                 return quote! { unsafe {
-                    let mut v: Vec<#ty> = (0..crate::SolarAsSize::as_size(&#size)).map(|_| crate::SolarAsVal::as_val(&#element)).collect();
+                    let mut v: Vec<#ty> = (0..crate::SolarAsSize::as_size(&#size)).map(|_| (&#element).as_val()).collect();
                     let p = v.as_mut_ptr();
                     std::mem::forget(v);
                     p
@@ -466,7 +474,10 @@ fn compile_expr(expr: &Expr, target_obj: Option<&String>, is_mut: bool) -> Token
             };
             let args = args.iter().enumerate().map(|(i, a)| {
                 let kind = arg_kinds.as_ref().and_then(|ks| ks.get(i)).cloned().unwrap_or(ArgKind::Value);
-                match kind {
+                if is_phantom && matches!(kind, ArgKind::Value) {
+                    let e = compile_expr(a, target_obj, false);
+                    return quote!((&#e).as_val());
+                }                match kind {
                     ArgKind::Value => wrap_expr_for_ref(a, target_obj, false),
                     ArgKind::Ref => wrap_expr_for_ref(a, target_obj, false),
                     ArgKind::MutRef => wrap_expr_for_ref(a, target_obj, true),
@@ -474,7 +485,8 @@ fn compile_expr(expr: &Expr, target_obj: Option<&String>, is_mut: bool) -> Token
             });
             quote! { #id(#( #args ),*) }
         }
-        ExprKind::MethodCall(lhs, name, args, _resolved_obj_name, arg_kinds) => {
+        ExprKind::MethodCall(lhs, name, args, resolved_obj_name, arg_kinds) => {
+            let is_phantom = matches!(expr.ty, Some(Type::Any));
             let l = compile_expr(lhs, target_obj, is_mut);
             
             // Special handling for pointer arithmetic methods which expect usize
@@ -491,10 +503,22 @@ fn compile_expr(expr: &Expr, target_obj: Option<&String>, is_mut: bool) -> Token
                 }
             }
 
-            let id = quote::format_ident!("{}", name);
+            let mut name_to_use = name.clone();
+            if !is_phantom {
+                if let Some(obj) = resolved_obj_name {
+                    if ["string", "str", "vector", "i32", "i64", "f32", "f64"].contains(&obj.as_str()) {
+                        name_to_use = format!("solar_{}", name);
+                    }
+                }
+            }
+
+            let id = quote::format_ident!("{}", name_to_use);
             let args = args.iter().enumerate().map(|(i, a)| {
                 let kind = arg_kinds.as_ref().and_then(|ks| ks.get(i)).cloned().unwrap_or(ArgKind::Value);
-                match kind {
+                if is_phantom && matches!(kind, ArgKind::Value) {
+                    let e = compile_expr(a, target_obj, false);
+                    return quote!((&#e).as_val());
+                }                match kind {
                     ArgKind::Value => wrap_expr_for_ref(a, target_obj, false),
                     ArgKind::Ref => wrap_expr_for_ref(a, target_obj, false),
                     ArgKind::MutRef => wrap_expr_for_ref(a, target_obj, true),
@@ -519,12 +543,12 @@ fn compile_expr(expr: &Expr, target_obj: Option<&String>, is_mut: bool) -> Token
         ExprKind::IndexAccess(lhs, index) => {
             let l = compile_expr(lhs, target_obj, is_mut);
             let i = compile_expr(index, target_obj, false);
-            quote! { (#l).solar_index(crate::SolarAsVal::as_val(&#i)) }
+            quote! { (#l).solar_index((&#i).as_val()) }
         }
         ExprKind::Cast(inner, ty) => {
             let e = compile_expr(inner, target_obj, false);
             let t = compile_type_ext(ty, target_obj);
-            quote! { (crate::SolarAsVal::as_val(&#e) as #t) }
+            quote! { ((&#e).as_val() as #t) }
         }
         ExprKind::StructLiteral {
             path,
@@ -559,7 +583,7 @@ fn compile_expr(expr: &Expr, target_obj: Option<&String>, is_mut: bool) -> Token
                     ExprKind::Try(_) | ExprKind::Unwrap(_) | ExprKind::Await(_) => {
                         quote! { #fname: #fval }
                     }
-                    _ => quote! { #fname: crate::SolarAsVal::as_val(&#fval) }
+                    _ => quote! { #fname: (&#fval).as_val() }
                 }
             });
             quote! { #final_id { #( #fields ),* } }
@@ -654,10 +678,10 @@ fn compile_stmt(stmt: &Stmt, is_last: bool, target_obj: Option<&String>, expecte
             if let ExprKind::IndexAccess(lhs, index) = &target.kind {
                 let l = compile_expr(lhs, target_obj, true);
                 let i = compile_expr(index, target_obj, false);
-                quote! { unsafe { *#l.add(crate::SolarAsSize::as_size(&#i)) = crate::SolarAsVal::as_val(&#v); } }
+                quote! { unsafe { *#l.add(crate::SolarAsSize::as_size(&#i)) = (&#v).as_val(); } }
             } else {
                 let t = compile_expr(target, target_obj, true);
-                quote! { #t = crate::SolarAsVal::as_val(&#v); }
+                quote! { #t = (&#v).as_val(); }
             }
         }
         StmtKind::Block(stmts) => {
@@ -925,12 +949,59 @@ pub fn compile(program: Program, output_name: &str) {
         dependencies.push(("tokio".to_string(), "1.0".to_string()));
     }
 
+    let has_macroquad = dependencies.iter().any(|(n, _)| n == "macroquad");
+    let cargo_toml_features = if has_macroquad {
+        quote! { [features]
+macroquad = [] }
+    } else {
+        quote!()
+    };
+
     tokens.extend(quote! {
         #![allow(unused)]
         #[global_allocator]
         static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
 
         use std::io::{Read, Write};
+        use std::borrow::Cow;
+
+        #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+        pub enum SolarCow<'a> {
+            Borrowed(&'a str),
+            Owned(String),
+        }
+
+        impl<'a> SolarCow<'a> {
+            pub fn as_str(&self) -> &str {
+                match self {
+                    SolarCow::Borrowed(s) => s,
+                    SolarCow::Owned(s) => s.as_str(),
+                }
+            }
+        }
+
+        impl<'a> std::ops::Deref for SolarCow<'a> {
+            type Target = str;
+            fn deref(&self) -> &str { self.as_str() }
+        }
+
+        impl<'a> AsRef<str> for SolarCow<'a> {
+            fn as_ref(&self) -> &str { self.as_str() }
+        }
+
+        impl<'a> std::fmt::Display for SolarCow<'a> {
+            fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                write!(f, "{}", self.as_str())
+            }
+        }
+
+        impl<'a> From<&'a str> for SolarCow<'a> {
+            fn from(s: &'a str) -> Self { SolarCow::Borrowed(s) }
+        }
+
+        impl<'a> From<String> for SolarCow<'a> {
+            fn from(s: String) -> Self { SolarCow::Owned(s) }
+        }
 
         pub trait SolarStr {
             fn to_owned_string(&self) -> String;
@@ -1330,17 +1401,66 @@ pub fn compile(program: Program, output_name: &str) {
             fn as_val(&self) -> T;
         }
 
-        impl<T: Clone> SolarAsVal<T> for T {
-            fn as_val(&self) -> T { self.clone() }
+        impl<'a> crate::SolarAsVal<&'a str> for String {
+            fn as_val(&self) -> &'a str { unsafe { std::mem::transmute(self.as_str()) } }
         }
 
-        impl<'a, T: Clone> SolarAsVal<T> for &'a T {
-            fn as_val(&self) -> T { (*self).clone() }
+        impl<'a, 'b> crate::SolarAsVal<&'a str> for &'b String {
+            fn as_val(&self) -> &'a str { unsafe { std::mem::transmute(self.as_str()) } }
         }
 
-        impl<'a, 'b, T: Clone> SolarAsVal<T> for &'a &'b T {
-            fn as_val(&self) -> T { (**self).clone() }
+        impl<'a> crate::SolarAsVal<&'a str> for &'a str {
+            fn as_val(&self) -> &'a str { self }
         }
+
+        impl<'a, 'b> crate::SolarAsVal<&'a str> for &'b &'a str {
+            fn as_val(&self) -> &'a str { *self }
+        }
+
+        impl crate::SolarAsVal<String> for &str {
+            fn as_val(&self) -> String { self.to_string() }
+        }
+
+        impl crate::SolarAsVal<String> for &&str {
+            fn as_val(&self) -> String { self.to_string() }
+        }
+
+        impl crate::SolarAsVal<String> for String {
+            fn as_val(&self) -> String { self.clone() }
+        }
+
+        impl<'a> crate::SolarAsVal<String> for &'a String {
+            fn as_val(&self) -> String { (*self).clone() }
+        }
+
+        // Only implement for non-specialized types to avoid conflicts
+        // This is a hack, but without negative trait bounds or better specialization it's hard.
+        // We'll just implement for primitive-ish types that need it.
+        impl crate::SolarAsVal<i32> for i32 { fn as_val(&self) -> i32 { *self } }
+        impl crate::SolarAsVal<i32> for &i32 { fn as_val(&self) -> i32 { **self } }
+        impl crate::SolarAsVal<f32> for f32 { fn as_val(&self) -> f32 { *self } }
+        impl crate::SolarAsVal<f32> for &f32 { fn as_val(&self) -> f32 { **self } }
+        impl crate::SolarAsVal<f64> for f64 { fn as_val(&self) -> f64 { *self } }
+        impl crate::SolarAsVal<f64> for &f64 { fn as_val(&self) -> f64 { **self } }
+        impl crate::SolarAsVal<bool> for bool { fn as_val(&self) -> bool { *self } }
+        impl crate::SolarAsVal<bool> for &bool { fn as_val(&self) -> bool { **self } }
+
+        #[cfg(feature = "macroquad")]
+        impl crate::SolarAsVal<::macroquad::math::Vec2> for ::macroquad::math::Vec2 { fn as_val(&self) -> ::macroquad::math::Vec2 { *self } }
+        #[cfg(feature = "macroquad")]
+        impl crate::SolarAsVal<::macroquad::math::Vec2> for &::macroquad::math::Vec2 { fn as_val(&self) -> ::macroquad::math::Vec2 { **self } }
+        #[cfg(feature = "macroquad")]
+        impl crate::SolarAsVal<::macroquad::color::Color> for ::macroquad::color::Color { fn as_val(&self) -> ::macroquad::color::Color { *self } }
+        #[cfg(feature = "macroquad")]
+        impl crate::SolarAsVal<::macroquad::color::Color> for &::macroquad::color::Color { fn as_val(&self) -> ::macroquad::color::Color { **self } }
+
+
+        // We can't have a blanket impl T: Clone because it conflicts with specialized impls.
+        // For custom Solar objects, we can either generate the impl or use a macro.
+        // For now, let's add a few more common ones.
+        impl<T: Clone> SolarAsVal<Vec<T>> for Vec<T> { fn as_val(&self) -> Vec<T> { self.clone() } }
+        impl<T: Clone> SolarAsVal<Vec<T>> for &Vec<T> { fn as_val(&self) -> Vec<T> { (*self).clone() } }
+
 
         impl<T: Clone> SolarAsVal<T> for ::std::rc::Rc<::std::cell::RefCell<T>> {
             fn as_val(&self) -> T { self.borrow().clone() }
@@ -1498,6 +1618,10 @@ thiserror = "1.0"
         }
     }
 
+    if has_macroquad {
+        cargo_toml.push_str("\n[features]\nmacroquad = []\n");
+    }
+
     // Add profile optimizations for faster compilation
     cargo_toml.push_str(
         r#"
@@ -1523,8 +1647,13 @@ panic = "abort"
         .expect("Failed to write src/main.rs");
 
     println!("Compiling via Cargo...");
+    let mut args = vec!["build"];
+    if has_macroquad {
+        args.push("--features");
+        args.push("macroquad");
+    }
     let status = Command::new("cargo")
-        .args(&["build"])
+        .args(&args)
         .current_dir(project_dir)
         .status()
         .expect("Failed to run cargo build");
@@ -1658,8 +1787,22 @@ fn compile_decls(decls: &[Decl], tokens: &mut TokenStream) {
                         quote!(#[derive(Clone, Debug)])
                     }
                 };
+                let gens_short = if obj.generics.is_empty() {
+                    quote!()
+                } else {
+                    let gids = obj.generics.iter().map(|(g, _)| quote::format_ident!("{}", g));
+                    quote!(<#( #gids ),*>)
+                };
                 tokens.extend(
-                    quote! { #( #attrs )* #derive_error pub struct #name #gens { #( #fields ),* } },
+                    quote! { 
+                        #( #attrs )* #derive_error pub struct #name #gens { #( #fields ),* } 
+                        impl #gens crate::SolarAsVal<#name #gens_short> for #name #gens_short {
+                            fn as_val(&self) -> #name #gens_short { self.clone() }
+                        }
+                        impl #gens crate::SolarAsVal<#name #gens_short> for &#name #gens_short {
+                            fn as_val(&self) -> #name #gens_short { (*self).clone() }
+                        }
+                    },
                 );
             }
             Decl::Enum(enm) => {
@@ -1706,7 +1849,21 @@ fn compile_decls(decls: &[Decl], tokens: &mut TokenStream) {
                 } else {
                     quote!(#[derive(Clone, Debug)])
                 };
-                tokens.extend(quote! { #( #attrs )* #derive_error pub enum #name #gens { #( #variants ),* } });
+                let gens_short = if enm.generics.is_empty() {
+                    quote!()
+                } else {
+                    let gids = enm.generics.iter().map(|(g, _)| quote::format_ident!("{}", g));
+                    quote!(<#( #gids ),*>)
+                };
+                tokens.extend(quote! { 
+                    #( #attrs )* #derive_error pub enum #name #gens { #( #variants ),* } 
+                    impl #gens crate::SolarAsVal<#name #gens_short> for #name #gens_short {
+                        fn as_val(&self) -> #name #gens_short { self.clone() }
+                    }
+                    impl #gens crate::SolarAsVal<#name #gens_short> for &#name #gens_short {
+                        fn as_val(&self) -> #name #gens_short { (*self).clone() }
+                    }
+                });
             }
             Decl::ExternFunction(_) => {}
             Decl::ExternObject(obj) => {

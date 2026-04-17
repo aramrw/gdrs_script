@@ -155,18 +155,27 @@ where
             .ignore_then(expr.clone())
             .map_with(|e, extr| Expr { kind: ExprKind::Negate(Box::new(e)), span: extr.span(), ty: None });
 
-        let namespaced_call = identifier_path.clone()
+        let macro_name = choice((
+            select! { Token::Ident(name) => name },
+            just(Token::Str).to("str".to_string()),
+        ));
+
+        let namespaced_call = identifier_path.clone().map(Some).or(macro_name.map(|n| Some(vec![PathPart { name: n, generics: Vec::new() }]))).or(empty().to(None))
             .then(just(Token::Bang).or_not())
             .then(expr.clone().separated_by(just(Token::Comma)).collect::<Vec<_>>().delimited_by(just(Token::ParenOpen), just(Token::ParenClose)))
-            .map_with(|((path, bang), args), e| if bang.is_some() { 
-                let mut full_name = String::new();
-                for (i, part) in path.iter().enumerate() {
-                    if i > 0 { full_name.push_str("::"); }
-                    full_name.push_str(&part.name);
+            .map_with(|((path, bang), args), e| {
+                if bang.is_some() { 
+                    let mut full_name = String::new();
+                    if let Some(p) = path {
+                        for (i, part) in p.iter().enumerate() {
+                            if i > 0 { full_name.push_str("::"); }
+                            full_name.push_str(&part.name);
+                        }
+                    }
+                    Expr { kind: ExprKind::MacroCall(full_name, args), span: e.span(), ty: None }
+                } else { 
+                    Expr { kind: ExprKind::Call(path.unwrap_or_default(), args, None, None), span: e.span(), ty: None }
                 }
-                Expr { kind: ExprKind::MacroCall(full_name, args), span: e.span(), ty: None }
-            } else { 
-                Expr { kind: ExprKind::Call(path, args, None, None), span: e.span(), ty: None }
             });
 
         let term = choice((struct_literal, namespaced_call, borrow, negate, alloc_or_deref, downgrade, array_init, val, expr.clone().delimited_by(just(Token::ParenOpen), just(Token::ParenClose))));
