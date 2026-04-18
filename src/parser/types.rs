@@ -41,16 +41,18 @@ where
             .map(|(mut_kw, inner)| Type::Ref(Box::new(inner), mut_kw.is_some()));
 
         let ptr = choice((
-            // Weak pointers: ~*T or ~**T
+            // Weak pointers: ~*rc T or ~*arc T
             just(Token::Tilde)
                 .ignore_then(just(Token::Star))
                 .ignore_then(choice((
-                    just(Token::Star)
+                    just(Token::Arc)
                         .ignore_then(ty.clone())
                         .map(|inner| Type::WeakThreadSafe(Box::new(inner))),
-                    ty.clone().map(|inner| Type::WeakManaged(Box::new(inner))),
+                    just(Token::Rc)
+                        .ignore_then(ty.clone())
+                        .map(|inner| Type::WeakManaged(Box::new(inner))),
                 ))),
-            // Pointers starting with *: *T, **T, *mut T, *const T, *box T
+            // Pointers starting with *: *rc T, *arc T, *mut T, *const T, *box T
             just(Token::Star).ignore_then(choice((
                 just(Token::Box)
                     .ignore_then(ty.clone())
@@ -61,12 +63,14 @@ where
                 just(Token::Const)
                     .ignore_then(ty.clone())
                     .map(|inner| Type::RawPtr(Box::new(inner), false)),
-                just(Token::Star)
+                just(Token::Arc)
                     .ignore_then(ty.clone())
                     .map(|inner| Type::ThreadSafe(Box::new(inner))),
-                ty.clone().map(|inner| Type::Managed(Box::new(inner))),
+                just(Token::Rc)
+                    .ignore_then(ty.clone())
+                    .map(|inner| Type::Managed(Box::new(inner))),
             ))),
-        ));
+        )).boxed();
 
         let array = ty
             .clone()

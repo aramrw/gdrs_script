@@ -38,9 +38,9 @@ cargo run -- main.sr
 ```
 
 ### Run the Compiled Program
-The compiler produces an executable named `main_program` in the root directory:
+The compiler produces an executable named `sr_<filename>` (e.g., `sr_main` for `main.sr`) in the root directory:
 ```bash
-./main_program
+./sr_main
 ```
 
 ## Development Conventions

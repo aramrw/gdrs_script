@@ -98,8 +98,8 @@ pub fn compile_function(
     let main_ret_ty = Type::Result(Box::new(Type::Unit), Box::new(Type::Error));
 
     let body = if func.name == "main" && !is_macroquad {
-        let b = compile_stmt(&func.body, true, target_obj, Some(&main_ret_ty));
-        quote! { { #b Ok(()) } }
+        let b = compile_stmt(&func.body, true, target_obj, None);
+        quote! { { #b; Ok(()) } }
     } else {
         compile_stmt(
             &func.body,

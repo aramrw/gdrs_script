@@ -162,6 +162,7 @@ dependencies = [
  "mimalloc",
  "proc-macro2",
  "quote",
+ "syn",
  "thiserror",
 ]
 

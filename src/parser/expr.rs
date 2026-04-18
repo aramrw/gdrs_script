@@ -32,8 +32,18 @@ where
 
         let val = choice((
             just(Token::ParenOpen)
-                .then(just(Token::ParenClose))
-                .to(ExprKind::Unit),
+                .then(expr.clone().separated_by(just(Token::Comma)).collect::<Vec<_>>())
+                .then_ignore(just(Token::ParenClose))
+                .map(|(_, items): (Token, Vec<Expr>)| {
+                    if items.is_empty() {
+                        ExprKind::Unit
+                    } else if items.len() == 1 {
+                        let first = items.into_iter().next().unwrap();
+                        first.kind
+                    } else {
+                        ExprKind::Tuple(items)
+                    }
+                }),
             select! { Token::Int(v) => ExprKind::Int(v) },
             select! { Token::Int64(v) => ExprKind::Int64(v) },
             select! { Token::Float(v) => ExprKind::Float(v) },
@@ -52,7 +62,7 @@ where
             .ignore_then(choice((
                 just(Token::Box)
                     .to(AllocKind::Box)
-                    .then(expr.clone())
+                    .then(expr.clone().parens())
                     .map(|(_, e)| ExprKind::Alloc(Box::new(e), AllocKind::Box)),
                 just(Token::Mut)
                     .to(AllocKind::RawMut)
@@ -64,15 +74,16 @@ where
                     .map(|(_, e)| ExprKind::Alloc(Box::new(e), AllocKind::RawConst)),
                 just(Token::Rc)
                     .to(AllocKind::Rc)
-                    .then(expr.clone())
+                    .then(expr.clone().parens())
                     .map(|(_, e)| ExprKind::Alloc(Box::new(e), AllocKind::Rc)),
                 just(Token::Arc)
                     .to(AllocKind::Arc)
-                    .then(expr.clone())
+                    .then(expr.clone().parens())
                     .map(|(_, e)| ExprKind::Alloc(Box::new(e), AllocKind::Arc)),
                 expr.clone().map(|e| ExprKind::Deref(Box::new(e))),
             )))
-            .into_expr();
+            .into_expr()
+            .boxed();
 
         let downgrade = just(Token::Tilde)
             .ignore_then(expr.clone())
@@ -91,6 +102,7 @@ where
                         generics: Vec::new(),
                     }],
                     vec![v, s],
+                    None,
                     None,
                     None,
                 )
@@ -152,7 +164,6 @@ where
                     generics: Vec::new(),
                 }])
             }))
-            .or(empty().to(None))
             .then(just(Token::Bang).or_not())
             .then(
                 expr.clone()
@@ -170,7 +181,7 @@ where
                         .join("::");
                     ExprKind::MacroCall(full_name, args)
                 } else {
-                    ExprKind::Call(path.unwrap_or_default(), args, None, None)
+                    ExprKind::Call(path.unwrap_or_default(), args, None, None, None)
                 }
             })
             .into_expr();
@@ -199,7 +210,10 @@ where
 
         let suffix = choice((
             just(Token::Dot)
-                .ignore_then(ident())
+                .ignore_then(choice((
+                    ident(),
+                    select! { Token::Int(v) => v.to_string() },
+                )))
                 .then(
                     expr.clone()
                         .separated_by(just(Token::Comma))
@@ -246,7 +260,7 @@ where
                     ty: None,
                 },
                 Suffix::Method(name, Some(args)) => Expr {
-                    kind: ExprKind::MethodCall(Box::new(lhs), name, args, None, None),
+                    kind: ExprKind::MethodCall(Box::new(lhs), name, args, None, None, None),
                     span,
                     ty: None,
                 },

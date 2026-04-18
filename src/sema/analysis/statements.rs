@@ -38,7 +38,7 @@ impl<'a> StatementAnalyzer<'a> {
                     .var_declarations
                     .insert(name.clone(), (self.analysis_info.scope_depth, false));
                 let val_ty = self.analyze_expr(value)?; // Use expression analyzer
-                let expected_ty = ty.as_ref().map(|t| self.type_info.resolve_type(t));
+                let expected_ty = ty.as_ref().map(|t| self.type_info.resolve_type(t, &self.analysis_info.current_prefix));
                 if let Some(et) = expected_ty {
                     if !self.analysis_info.types_equal(&et, &val_ty) {
                         self.analysis_info.semantic_error(
@@ -128,6 +128,7 @@ impl<'a> StatementAnalyzer<'a> {
                 }
                 Ok(())
             }
+
             _ => Ok(()), // Ignore other statement types for now
         }
     }

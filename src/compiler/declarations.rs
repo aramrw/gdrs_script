@@ -99,7 +99,11 @@ pub fn compile_decls(decls: &[Decl], tokens: &mut TokenStream) {
                 let gens = compile_generics(&obj.generics);
                 let fields = obj.fields.iter().map(|f| {
                     let fname = quote::format_ident!("{}", f.name);
-                    let fty = compile_type(&f.ty);
+                    let fty = if matches!(f.ty, Type::Str) {
+                        quote!(::std::string::String)
+                    } else {
+                        compile_type(&f.ty)
+                    };
                     let fattrs = f.attributes.iter().map(|a| {
                         if a.starts_with("e(") {
                             let content = &a[2..a.len() - 1];
@@ -268,7 +272,7 @@ pub fn compile_decls(decls: &[Decl], tokens: &mut TokenStream) {
 
                 for part in parts.into_iter().rev() {
                     let id = quote::format_ident!("{}", part);
-                    mod_tokens = quote! { pub mod #id { use std; use crate::{SolarStr, SolarString, SolarVec, SolarIndex, SolarAdd, SolarSub, SolarMul, SolarDiv, SolarGT, SolarLT, SolarLE, SolarGE, SolarEq, SolarI32, SolarI64, SolarF32, SolarF64, SolarAsArg, SolarAsVal, SolarAsSize, sr_math, sr_io, sr_fs}; #mod_tokens } };
+                    mod_tokens = quote! { pub mod #id { use ::std as std; use crate::{SolarStr, SolarString, SolarVec, SolarIndex, SolarAdd, SolarInto, SolarI32, SolarI64, SolarF32, SolarF64, SolarAsArg, SolarAsVal, SolarAsSize, sr_math, sr_io, sr_fs}; #mod_tokens } };
                 }
                 tokens.extend(mod_tokens);
             }

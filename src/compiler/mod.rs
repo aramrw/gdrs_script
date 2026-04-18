@@ -146,6 +146,9 @@ pub(crate) fn compile_id_ext(name: &str, is_expr: bool) -> TokenStream {
 
     // 3. Check explicit RUST_MAPPINGS
     if let Ok(mappings) = RUST_MAPPINGS.lock() {
+        if name.contains("pi") {
+            println!("DEBUG compile_id_ext name={}, mappings has std::math::pi={:?}", name, mappings.get("std::math::pi"));
+        }
         // adjust this import if needed
         // Exact Match
         if let Some(rust_path) = mappings.get(name) {
@@ -170,7 +173,7 @@ pub(crate) fn compile_id_ext(name: &str, is_expr: bool) -> TokenStream {
     }
 
     // Known Solar standard library root modules
-    let root_modules = ["mem", "sr_fs", "sr_io", "sr_math", "util", "vec", "option"];
+    let root_modules = ["mem", "sr_fs", "sr_io", "sr_math", "sr_string", "string", "util", "vec", "option"];
 
     // 4. Resolve namespaces (::)
     if name.contains("::") {
@@ -190,7 +193,14 @@ pub(crate) fn compile_id_ext(name: &str, is_expr: bool) -> TokenStream {
 
             // If it hits one of Solar's root modules, enforce the `crate::` prefix
             _ if root_modules.contains(&first) => {
-                let first_id = quote::format_ident!("{}", first);
+                let mapped_first = match first {
+                    "string" => "sr_string",
+                    "fs" => "sr_fs",
+                    "io" => "sr_io",
+                    "math" => "sr_math",
+                    _ => first,
+                };
+                let first_id = quote::format_ident!("{}", mapped_first);
                 quote!(crate::#first_id::#( #rest_tokens )::*)
             }
 
@@ -229,7 +239,14 @@ fn compile_path(path: &[PathPart], target_obj: Option<&String>) -> TokenStream {
         .iter()
         .filter(|p| !p.name.is_empty())
         .map(|p| {
-            let name = quote::format_ident!("{}", p.name);
+            let name_to_use = match p.name.as_str() {
+                "string" => "sr_string",
+                "fs" => "sr_fs",
+                "io" => "sr_io",
+                "math" => "sr_math",
+                _ => &p.name,
+            };
+            let name = quote::format_ident!("{}", name_to_use);
             if p.generics.is_empty() {
                 quote!(#name)
             } else {
@@ -273,31 +290,63 @@ fn compile_pattern(pat: &Pattern) -> TokenStream {
     }
 }
 
-fn wrap_expr_for_ref(expr: &Expr, target_obj: Option<&String>, mutable: bool) -> TokenStream {
+fn wrap_expr_for_ref(expr: &Expr, expected_ty: Option<&Type>, target_obj: Option<&String>, mutable: bool) -> TokenStream {
     let tokens = compile_expr(expr, target_obj, mutable);
 
     if let Some(ty) = &expr.ty {
         match ty {
-            Type::Managed(_) => {
-                if mutable {
-                    quote! { &mut *#tokens.borrow_mut() }
+            Type::Managed(_) | Type::ThreadSafe(_) | Type::BoxPtr(_) => {
+                // If we have a pointer, but the function expects the inner type, auto-deref.
+                let is_ptr_expected = expected_ty.map_or(false, |et| matches!(et, Type::Managed(_) | Type::ThreadSafe(_) | Type::BoxPtr(_)));
+                
+                if !is_ptr_expected {
+                    match ty {
+                        Type::Managed(_) => {
+                            if mutable {
+                                quote! { &mut *#tokens.borrow_mut() }
+                            } else {
+                                quote! { &*#tokens.borrow() }
+                            }
+                        }
+                        Type::ThreadSafe(_) => {
+                            if mutable {
+                                quote! { &mut *#tokens.write() }
+                            } else {
+                                quote! { &*#tokens.read() }
+                            }
+                        }
+                        Type::BoxPtr(_) => {
+                            if mutable {
+                                quote! { &mut **#tokens }
+                            } else {
+                                quote! { &**#tokens }
+                            }
+                        }
+                        _ => quote! { &#tokens }
+                    }
                 } else {
-                    quote! { &*#tokens.borrow() }
-                }
-            }
-            Type::ThreadSafe(_) => {
-                if mutable {
-                    quote! { &mut *#tokens.write() }
-                } else {
-                    quote! { &*#tokens.read() }
+                    // Function explicitly expects the pointer type, so pass a reference to it.
+                    quote! { &#tokens }
                 }
             }
             Type::Ref(_, _) => tokens, // Already a ref
             _ => {
-                if mutable {
-                    quote! { &mut #tokens }
+                // If it's a Custom or Array type, it's almost certainly expected as a reference in a Solar function
+                let is_ref_expected = expected_ty.map_or(true, |et| {
+                    match et {
+                        Type::Ref(_, _) => true,
+                        Type::Custom(_, _) | Type::Array(_, _) | Type::Managed(_) | Type::ThreadSafe(_) | Type::BoxPtr(_) => true,
+                        _ => false,
+                    }
+                });
+                if is_ref_expected {
+                    if mutable {
+                        quote! { &mut #tokens }
+                    } else {
+                        quote! { &#tokens }
+                    }
                 } else {
-                    quote! { &#tokens }
+                    quote! { (&#tokens).as_val() }
                 }
             }
         }
@@ -355,7 +404,7 @@ pub fn compile(program: Program, output_name: &str) {
     }
 
     let has_macroquad = dependencies.iter().any(|(n, _)| n == "macroquad");
-    tokens.extend(generate_solar_std());
+    tokens.extend(generate_solar_std(has_macroquad));
 
     compile_decls(&program.declarations, &mut tokens);
 

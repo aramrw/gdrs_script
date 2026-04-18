@@ -11,7 +11,7 @@ pub fn compile_type_ext(ty: &Type, target_obj: Option<&String>) -> TokenStream {
         Type::F32 => quote!(f32),
         Type::F64 => quote!(f64),
         Type::Bool => quote!(bool),
-        Type::Str => quote!(&str),
+        Type::Str => quote!(::std::string::String),
         Type::String => quote!(::std::string::String),
         Type::File => quote!(::std::fs::File),
         Type::BoxPtr(inner) => {
@@ -102,6 +102,10 @@ pub fn compile_type_ext(ty: &Type, target_obj: Option<&String>) -> TokenStream {
             let o = compile_type_ext(ok, target_obj);
             let e = compile_type_ext(err, target_obj);
             quote!(Result<#o, #e>)
+        }
+        Type::Tuple(types) => {
+            let ts = types.iter().map(|t| compile_type_ext(t, target_obj));
+            quote!((#( #ts ),*))
         }
         Type::Any => quote!(_),
         Type::Error => quote!(Box<dyn ::std::error::Error>),

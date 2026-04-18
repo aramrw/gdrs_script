@@ -3,17 +3,16 @@ obj Point:
     y: i32
 
 obj Sprite:
-    pos: *Point
+    pos: *rc Point
 
-fn main():
+fn main() -> Result<(), Error>:
     var mut p = Point { x: 1, y: 2 }
     println!("Initial p.x: ", p.x)
     
-    // This should trigger promotion of p to *Point
-    var s = Sprite { pos: &p }
+    var s = Sprite { pos: *rc(p) }
     
     s.pos.x = 100
-    println!("Updated p.x through sprite: ", p.x)
-    println!("Sprite pos x: ", s.pos.x)
+    // p was moved into the Rc, so we can't access it here. We just access s.pos.x
+    println!("Updated pos x through sprite: ", s.pos.x)
     
     return Ok(())

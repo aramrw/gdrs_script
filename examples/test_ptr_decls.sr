@@ -1,0 +1,30 @@
+obj LargeObj:
+    id: i32
+    data: str
+
+impl LargeObj:
+    fn new(id: i32, data: str) -> Self:
+        Self { id, data }
+
+fn main() -> Result<(), Error>:
+    *const num = 1
+    println!("Const ptr to num: {}", num)
+
+    *mut m_num = 2
+    println!("Mut ptr to m_num: {}", m_num)
+
+    *box b_obj = LargeObj::new(10, "box data")
+    println!("Box obj id: {}", b_obj.id)
+
+    *rc r_obj = LargeObj::new(20, "rc data")
+    println!("RC obj id: {}", r_obj.id)
+    r_obj.id = 21
+
+    **arc a_obj = LargeObj::new(30, "arc data")
+    println!("ARC obj id: {}", a_obj.id)
+    a_obj.id = 31
+
+    println!("Final RC id: {}", r_obj.id)
+    println!("Final ARC id: {}", a_obj.id)
+
+    return Ok(())

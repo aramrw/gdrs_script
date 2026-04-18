@@ -30,12 +30,23 @@ impl AnalysisInfo {
         // Implement logic
     }
 
-    pub fn types_equal(&self, _a: &crate::ast::Type, _b: &crate::ast::Type) -> bool {
-        true
+    pub fn types_equal(&self, a: &crate::ast::Type, b: &crate::ast::Type) -> bool {
+        if matches!(a, crate::ast::Type::Any) || matches!(b, crate::ast::Type::Any) {
+            return true;
+        }
+        // Basic equality for now
+        a == b
     }
 
     pub fn deref_type(&self, ty: &crate::ast::Type) -> crate::ast::Type {
-        ty.clone()
+        match ty {
+            crate::ast::Type::Ref(inner, _)
+            | crate::ast::Type::BoxPtr(inner)
+            | crate::ast::Type::RawPtr(inner, _)
+            | crate::ast::Type::Managed(inner)
+            | crate::ast::Type::ThreadSafe(inner) => self.deref_type(inner),
+            _ => ty.clone(),
+        }
     }
 
     pub fn semantic_error(&self, _msg: String, _span: crate::lexer::Span) -> Result<crate::ast::Type, crate::error::CompilerError> {

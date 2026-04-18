@@ -12,13 +12,13 @@ use miette::SourceSpan;
 pub struct TraitInfo {
     pub generics: Vec<(String, Vec<String>)>,
     pub bounds: Vec<String>,
-    pub functions: HashMap<String, (Vec<Type>, Option<Type>)>,
+    pub functions: HashMap<String, (Vec<(Type, ArgKind)>, Option<Type>)>,
 }
 
 // --- SemanticAnalyzer fields related to type information ---
 #[derive(Debug)]
 pub struct TypeInfo {
-    pub functions: HashMap<String, (Vec<Type>, Option<Type>)>,
+    pub functions: HashMap<String, (Vec<(Type, ArgKind)>, Option<Type>)>,
     pub objects: HashMap<String, (HashMap<String, Type>, Vec<(String, Vec<String>)>)>,
     pub enums: HashMap<String, (HashMap<String, Vec<Type>>, Vec<(String, Vec<String>)>)>,
     pub traits: HashMap<String, TraitInfo>,
@@ -46,8 +46,8 @@ impl TypeInfo {
             "mem::free".to_string(),
             (
                 vec![
-                    Type::Ref(Box::new(Type::RawPtr(Box::new(Type::Any), true)), false),
-                    Type::Ref(Box::new(Type::I32), false),
+                    (Type::Ref(Box::new(Type::RawPtr(Box::new(Type::Any), true)), false), ArgKind::Ref),
+                    (Type::Ref(Box::new(Type::I32), false), ArgKind::Ref),
                 ],
                 None,
             ),
@@ -55,35 +55,35 @@ impl TypeInfo {
         type_info.functions.insert(
             "mem::alloc<>".to_string(),
             (
-                vec![Type::I32],
+                vec![(Type::I32, ArgKind::Value)],
                 Some(Type::RawPtr(Box::new(Type::Any), true)),
             ),
         );
         type_info.functions.insert(
             "fs::read_to_string".to_string(),
-            (vec![Type::Str], Some(Type::String)),
+            (vec![(Type::Str, ArgKind::Value)], Some(Type::String)),
         );
         type_info
             .functions
             .insert("io::readline".to_string(), (vec![], Some(Type::String)));
         type_info.functions
-            .insert("io::println".to_string(), (vec![Type::Str], None));
+            .insert("io::println".to_string(), (vec![(Type::Str, ArgKind::Value)], None));
 
         type_info.functions.insert(
             "str::len".to_string(),
-            (vec![Type::Ref(Box::new(Type::Str), false)], Some(Type::I32)),
+            (vec![(Type::Ref(Box::new(Type::Str), false), ArgKind::Ref)], Some(Type::I32)),
         );
         type_info.functions.insert(
             "str::contains".to_string(),
             (
-                vec![Type::Ref(Box::new(Type::Str), false), Type::Str],
+                vec![(Type::Ref(Box::new(Type::Str), false), ArgKind::Ref), (Type::Str, ArgKind::Value)],
                 Some(Type::Bool),
             ),
         );
         type_info.functions.insert(
             "str::split".to_string(),
             (
-                vec![Type::Ref(Box::new(Type::Str), false), Type::Str],
+                vec![(Type::Ref(Box::new(Type::Str), false), ArgKind::Ref), (Type::Str, ArgKind::Value)],
                 Some(Type::Custom(
                     "std::vec::Vector<>".into(),
                     vec![Type::String],
@@ -96,21 +96,21 @@ impl TypeInfo {
         type_info.functions.insert(
             "string::len".to_string(),
             (
-                vec![Type::Ref(Box::new(Type::String), false)],
+                vec![(Type::Ref(Box::new(Type::String), false), ArgKind::Ref)],
                 Some(Type::I32),
             ),
         );
         type_info.functions.insert(
             "string::contains".to_string(),
             (
-                vec![Type::Ref(Box::new(Type::String), false), Type::Str],
+                vec![(Type::Ref(Box::new(Type::String), false), ArgKind::Ref), (Type::Str, ArgKind::Value)],
                 Some(Type::Bool),
             ),
         );
         type_info.functions.insert(
             "string::split".to_string(),
             (
-                vec![Type::Ref(Box::new(Type::String), false), Type::Str],
+                vec![(Type::Ref(Box::new(Type::String), false), ArgKind::Ref), (Type::Str, ArgKind::Value)],
                 Some(Type::Custom(
                     "std::vec::Vector<>".into(),
                     vec![Type::String],
@@ -118,9 +118,44 @@ impl TypeInfo {
             ),
         );
         type_info.functions.insert(
+            "string::to_str".to_string(),
+            (
+                vec![(Type::Ref(Box::new(Type::String), false), ArgKind::Ref)],
+                Some(Type::Str),
+            ),
+        );
+        type_info.functions.insert(
+            "i32::to_string".to_string(),
+            (vec![(Type::Ref(Box::new(Type::I32), false), ArgKind::Ref)], Some(Type::String)),
+        );
+        type_info.functions.insert(
+            "i64::to_string".to_string(),
+            (vec![(Type::Ref(Box::new(Type::I64), false), ArgKind::Ref)], Some(Type::String)),
+        );
+        type_info.functions.insert(
+            "f32::to_string".to_string(),
+            (vec![(Type::Ref(Box::new(Type::F32), false), ArgKind::Ref)], Some(Type::String)),
+        );
+        type_info.functions.insert(
+            "f64::to_string".to_string(),
+            (vec![(Type::Ref(Box::new(Type::F64), false), ArgKind::Ref)], Some(Type::String)),
+        );
+        type_info.functions.insert(
+            "f32::powi".to_string(),
+            (
+                vec![(Type::Ref(Box::new(Type::F32), false), ArgKind::Ref), (Type::I32, ArgKind::Value)],
+                Some(Type::F32),
+            ),
+        );
+        type_info.functions.insert(
+            "f32::sqrt".to_string(),
+            (vec![(Type::Ref(Box::new(Type::F32), false), ArgKind::Ref)], Some(Type::F32)),
+        );
+
+        type_info.functions.insert(
             "string::append".to_string(),
             (
-                vec![Type::Ref(Box::new(Type::String), true), Type::Str],
+                vec![(Type::Ref(Box::new(Type::String), true), ArgKind::MutRef), (Type::Str, ArgKind::Value)],
                 None,
             ),
         );
@@ -128,18 +163,18 @@ impl TypeInfo {
         type_info
     }
 
-    pub fn resolve_type(&mut self, ty: &Type) -> Type {
+    pub fn resolve_type(&mut self, ty: &Type, prefix: &str) -> Type {
         match ty {
-            Type::BoxPtr(inner) => Type::BoxPtr(Box::new(self.resolve_type(inner))),
+            Type::BoxPtr(inner) => Type::BoxPtr(Box::new(self.resolve_type(inner, prefix))),
             Type::RawPtr(inner, mutable) => {
-                Type::RawPtr(Box::new(self.resolve_type(inner)), *mutable)
+                Type::RawPtr(Box::new(self.resolve_type(inner, prefix)), *mutable)
             }
-            Type::Ref(inner, mutable) => Type::Ref(Box::new(self.resolve_type(inner)), *mutable),
-            Type::Managed(inner) => Type::Managed(Box::new(self.resolve_type(inner))),
-            Type::ThreadSafe(inner) => Type::ThreadSafe(Box::new(self.resolve_type(inner))),
-            Type::WeakManaged(inner) => Type::WeakManaged(Box::new(self.resolve_type(inner))),
-            Type::WeakThreadSafe(inner) => Type::WeakThreadSafe(Box::new(self.resolve_type(inner))),
-            Type::Array(inner, size) => Type::Array(Box::new(self.resolve_type(inner)), *size),
+            Type::Ref(inner, mutable) => Type::Ref(Box::new(self.resolve_type(inner, prefix)), *mutable),
+            Type::Managed(inner) => Type::Managed(Box::new(self.resolve_type(inner, prefix))),
+            Type::ThreadSafe(inner) => Type::ThreadSafe(Box::new(self.resolve_type(inner, prefix))),
+            Type::WeakManaged(inner) => Type::WeakManaged(Box::new(self.resolve_type(inner, prefix))),
+            Type::WeakThreadSafe(inner) => Type::WeakThreadSafe(Box::new(self.resolve_type(inner, prefix))),
+            Type::Array(inner, size) => Type::Array(Box::new(self.resolve_type(inner, prefix)), *size),
             Type::SelfType => {
                 // This logic is currently in mod.rs for `analyze_function`, but `resolve_type` is called *during* that analysis.
                 // It should probably live with the symbol table, which will be in `analysis.rs`.
@@ -158,7 +193,7 @@ impl TypeInfo {
                     Type::Any
                 } else {
                     let resolved_generics: Vec<_> =
-                        generics.iter().map(|g| self.resolve_type(g)).collect();
+                        generics.iter().map(|g| self.resolve_type(g, prefix)).collect();
 
                     let mut name_to_lookup = name.clone();
                     // NOTE: Logic for 'Self' and 'self' needs context from symbol table (current_obj),
@@ -177,19 +212,17 @@ impl TypeInfo {
                     } else if let Some(alias) = self.aliases.get(name) {
                         name_to_lookup = alias.clone();
                     } else {
-                        // This part assumes `current_prefix` is available, which is in analysis.rs
-                        // Placeholder: `current_prefix` will be passed or accessed via context.
-                        let prefixed = format!("{}::{}", "current_prefix_placeholder", name); 
-                        if self.objects.contains_key(&prefixed)
-                            || self.objects.contains_key(&format!("{}<>", prefixed))
-                            || self.enums.contains_key(&prefixed)
-                            || self.enums.contains_key(&format!("{}<>", prefixed))
-                            || self.traits.contains_key(&prefixed)
-                            || self.traits.contains_key(&format!("{}<>", prefixed))
-                        {
-                            name_to_lookup = prefixed;
-                        } else {
-                            name_to_lookup = name.clone();
+                        if !prefix.is_empty() {
+                            let prefixed = format!("{}::{}", prefix, name); 
+                            if self.objects.contains_key(&prefixed)
+                                || self.objects.contains_key(&format!("{}<>", prefixed))
+                                || self.enums.contains_key(&prefixed)
+                                || self.enums.contains_key(&format!("{}<>", prefixed))
+                                || self.traits.contains_key(&prefixed)
+                                || self.traits.contains_key(&format!("{}<>", prefixed))
+                            {
+                                name_to_lookup = prefixed;
+                            }
                         }
                     }
 
@@ -202,8 +235,8 @@ impl TypeInfo {
                 }
             }
             Type::Result(ok, err) => Type::Result(
-                Box::new(self.resolve_type(ok)),
-                Box::new(self.resolve_type(err)),
+                Box::new(self.resolve_type(ok, prefix)),
+                Box::new(self.resolve_type(err, prefix)),
             ),
             _ => ty.clone(),
         }
@@ -245,7 +278,7 @@ impl TypeInfo {
 
                     let mut fields = HashMap::new();
                     for f in &obj.fields {
-                        fields.insert(f.name.clone(), f.ty.clone());
+                        fields.insert(f.name.clone(), self.resolve_type(&f.ty, prefix));
                     }
                     self.objects
                         .insert(full_name, (fields, obj.generics.clone()));
@@ -285,12 +318,21 @@ impl TypeInfo {
                     }
                     let mut trait_funcs = HashMap::new();
                     for f in &tr.functions {
-                        // Resolve types for trait function signatures here, but note that generics might need context
-                        // from `generic_params` which is also in `TypeInfo`.
-                        // For now, assume `resolve_type` can handle generic types appropriately even during collection.
-                        let ret = f.return_type.as_ref().map(|t| self.resolve_type(t));
-                        let sig_params: Vec<_> =
-                            f.params.iter().map(|p| self.resolve_type(&p.ty)).collect();
+                        let ret = f.return_type.as_ref().map(|t| self.resolve_type(t, prefix));
+                        let sig_params: Vec<_> = f
+                            .params
+                            .iter()
+                            .map(|p| {
+                                let ty = self.resolve_type(&p.ty, prefix);
+                                let kind = match &ty {
+                                    Type::Ref(_, true) => ArgKind::MutRef,
+                                    Type::Ref(_, false) => ArgKind::Ref,
+                                    _ if p.is_mutable => ArgKind::MutRef,
+                                    _ => ArgKind::Value,
+                                };
+                                (ty, kind)
+                            })
+                            .collect();
                         let sig = (sig_params, ret);
                         trait_funcs.insert(f.name.clone(), sig.clone());
                         // Store with full namespaced trait name for direct lookup
@@ -325,11 +367,19 @@ impl TypeInfo {
                     // For now, we just record them.
                     let mut resolved_params = Vec::new();
                     for p in &func.params {
-                        resolved_params.push(self.resolve_type(&p.ty));
+                        let ty = self.resolve_type(&p.ty, prefix);
+                        let kind = match &ty {
+                            Type::Ref(_, true) => ArgKind::MutRef,
+                            Type::Ref(_, false) => ArgKind::Ref,
+                            _ if p.is_mutable => ArgKind::MutRef,
+                            _ => ArgKind::Value,
+                        };
+                        resolved_params.push((ty, kind));
                     }
-                    let resolved_ret = func.return_type.as_ref().map(|t| self.resolve_type(t));
+                    let resolved_ret = func.return_type.as_ref().map(|t| self.resolve_type(t, prefix));
 
-                    self.functions.insert(final_name, (resolved_params, resolved_ret));
+                    self.functions.insert(final_name.clone(), (resolved_params, resolved_ret));
+                    //println!("DEBUG collect_decls added function: {}", final_name);
                 }
                 Decl::Module(name, inner) => {
                     let new_prefix = if prefix.is_empty() {
@@ -401,9 +451,33 @@ impl TypeInfo {
                     for func in &imp.functions {
                         // Store method signatures, namespaced by the target type
                         let method_full_name = format!("{}::{}", full_target, func.name);
-                        let sig_params: Vec<_> =
-                            func.params.iter().map(|p| self.resolve_type(&p.ty)).collect();
-                        let sig_ret = func.return_type.as_ref().map(|t| self.resolve_type(t));
+                        let sig_params: Vec<_> = func
+                            .params
+                            .iter()
+                            .map(|p| {
+                                let ty = if p.name == "self" {
+                                    // Resolve self type
+                                    if full_target.contains('<') {
+                                        let parts: Vec<_> = full_target.split('<').collect();
+                                        let name = parts[0].to_string();
+                                        Type::Custom(name, Vec::new()) // Simplified generics for now
+                                    } else {
+                                        Type::Custom(full_target.clone(), Vec::new())
+                                    }
+                                } else {
+                                    self.resolve_type(&p.ty, prefix)
+                                };
+                                let kind = match &ty {
+                                    Type::Ref(_, true) => ArgKind::MutRef,
+                                    Type::Ref(_, false) => ArgKind::Ref,
+                                    _ if p.is_mutable => ArgKind::MutRef,
+                                    _ => ArgKind::Value,
+                                };
+                                (ty, kind)
+                            })
+                            .collect();
+                        let sig_ret = func.return_type.as_ref().map(|t| self.resolve_type(t, prefix));
+                        //println!("DEBUG collect_impls added method: {}", method_full_name);
                         self.functions.insert(method_full_name, (sig_params, sig_ret));
 
                         // Also store generic params for functions within the impl block
