@@ -1,0 +1,19 @@
+rust dependency ratatui = "0.30.0"
+rust dependency crossterm = "0.28.1"
+
+use crate::ratatui::{DefaultTerminal, Frame}
+use crate::ratatui
+use crate::crossterm
+
+fn main() -> Result<(), error>:
+    ratatui::run(app)?
+
+fn app(terminal: &mut DefaultTerminal) -> Result<(), error>:
+    loop:
+        terminal.draw(render)?
+        var e = crossterm::event::read()?
+        break
+    Ok(())
+
+fn render(frame: &mut Frame):
+    frame.render_widget("ratatui running from sr", frame.area())

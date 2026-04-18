@@ -1,0 +1,31 @@
+fn main():
+    // string literals are of type 'str' (&str in Rust)
+    var s = "hello"
+    println!(s)
+    println!(s.len())
+
+    // string::new() creates a heap-allocated 'string' (String in Rust)
+    var mut dynamic_s = string::new()
+    dynamic_s.append(" world")
+    println!(dynamic_s)
+    println!(dynamic_s.len())
+
+    // REDUCED CEREMONY:
+    // We can pass 'string' where 'str' is expected
+    if dynamic_s.contains("world"):
+        println!("dynamic_s contains 'world'")
+
+    // str!() macro
+    var owned = str!("I am owned") // defaults to String
+    var literal: str = "I am a literal"
+    
+    println!(owned)
+    println!(literal)
+
+    // Using str! to convert str to string (owned)
+    var owned2 = str!(literal)
+    println!(owned2)
+
+    // Using str! as empty string
+    var empty = str!()
+    println!(empty.len())

@@ -1,0 +1,32 @@
+obj Data:
+    val: i32
+
+fn process_box(p: *box Data):
+    println!("Box val: ", p.val)
+
+fn process_rc(p: *rc Data):
+    println!("RC val: ", p.val)
+    p.val = p.val + 1
+
+fn process_arc(p: *arc Data):
+    println!("ARC val: ", p.val)
+    p.val = p.val + 2
+
+fn main() -> Result<(), Error>:
+    // Box
+    var b = *box(Data { val: 10 })
+    process_box(b)
+
+    // RC
+    // Explicitly moving into RC
+    var r = *rc(Data { val: 20 })
+    process_rc(r)
+    println!("RC after: ", r.val)
+
+    // ARC
+    // Explicitly moving into ARC
+    var a = *arc(Data { val: 30 })
+    process_arc(a)
+    println!("ARC after: ", a.val)
+
+    return Ok(())

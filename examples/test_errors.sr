@@ -1,0 +1,42 @@
+#[error]
+enum InnerError:
+    #[e("inner fail")]
+    Fail
+
+#[error]
+enum AppError:
+    #[e("io error: {0}")]
+    #[from]
+    Io(InnerError)
+    
+    #[e("invalid name: {0}")]
+    InvalidName(String)
+    
+    #[e("unknown error")]
+    Unknown
+
+fn might_fail(name: str) -> Result<String, AppError>:
+    if name == "fail":
+        return Err(AppError::InvalidName("fail".to_string()))
+    
+    if name == "inner":
+        return Err(InnerError::Fail)?
+        
+    return Ok("success".to_string())
+
+fn main():
+    var mut res = might_fail("success")?
+    println!("Result 1: ", res)
+
+    var res2 = might_fail("fail")
+    match res2:
+        Ok(val) => println!("Unexpected success: ", val)
+        Err(err) => println!("Caught expected error: ", err)
+
+    var res3 = might_fail("inner")
+    match res3:
+        Ok(val) => println!("Unexpected success: ", val)
+        Err(err) => println!("Caught inner error: ", err)
+
+    return Ok(())
+

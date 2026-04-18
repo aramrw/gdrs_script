@@ -2,12 +2,17 @@
 name = "lang"
 version = "0.1.0"
 edition = "2024"
+default-run = "lang"
 
 [dependencies]
 chumsky = "0.12.0"
 quote = "1.0"
 proc-macro2 = "1.0"
 lazy_static = "1.4"
+miette = { version = "7.6.0", features = ["fancy"] }
+thiserror = "2.0.18"
+mimalloc = "0.1"
+syn = { version = "2.0.117", features = ["full"] }
 
 [[bin]]
 name = "debug"

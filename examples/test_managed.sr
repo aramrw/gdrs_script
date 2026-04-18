@@ -1,0 +1,18 @@
+obj Point:
+    x: i32
+    y: i32
+
+obj Sprite:
+    pos: *rc Point
+
+fn main() -> Result<(), Error>:
+    var mut p = Point { x: 1, y: 2 }
+    println!("Initial p.x: ", p.x)
+    
+    var s = Sprite { pos: *rc(p) }
+    
+    s.pos.x = 100
+    // p was moved into the Rc, so we can't access it here. We just access s.pos.x
+    println!("Updated pos x through sprite: ", s.pos.x)
+    
+    return Ok(())
