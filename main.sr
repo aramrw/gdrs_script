@@ -1,4 +1,8 @@
-use std::vec::Vec;
+use rust::std::vec::Vec;
 
 fn main():
-    var vecs: Vec<&i32> = vec![0, 2, 5, 7];
+    var mut x: Vec<&str> = Vec::new()
+    x.push("hello")
+
+    println!(typeof!(x))
+    println!(typeof!(x[0]))

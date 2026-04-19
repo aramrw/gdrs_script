@@ -9,7 +9,6 @@ pub enum Type {
     F64,
     Bool,
     Str,
-    String,
     File,
     Array(Box<Type>, usize),
     BoxPtr(Box<Type>),
@@ -252,8 +251,8 @@ pub struct ImplDecl {
 pub struct UseDecl {
     pub path: Vec<String>,
     pub items: Vec<String>,
-    pub is_wildcard: bool, // Support ::*
-    pub is_crate: bool,    // If it starts with 'crate::'
+    pub is_wildcard: bool,
+    pub is_rust: bool,    // If it starts with 'rust::'
 }
 
 #[derive(Debug, Clone, PartialEq)]

@@ -104,10 +104,10 @@ impl<'a> ExpressionAnalyzer<'a> {
 
                     // Special handling for string concatenation
                     if *op == BinaryOp::Add {
-                        let is_l_string = l_base == Type::String || l_base == Type::Str;
-                        let is_r_string = r_base == Type::String || r_base == Type::Str;
+                        let is_l_string = l_base == Type::Str;
+                        let is_r_string = r_base == Type::Str;
                         if is_l_string || is_r_string {
-                            return Ok(Type::String); // Result of string concat is String
+                            return Ok(Type::Str); // Result of string concat is Str
                         }
                     }
 
@@ -152,7 +152,7 @@ impl<'a> ExpressionAnalyzer<'a> {
 
                 let _type = match name.as_str() {
                     "tyepof" => Type::Str,
-                    "str" => Type::String,
+                    "str" => Type::Str,
                     "vec" => Type::Any,
                     "println" | "print" => Type::Unit,
                     _ => {
@@ -423,7 +423,6 @@ impl<'a> ExpressionAnalyzer<'a> {
 
                 let obj_name = match &actual_ty {
                     Type::Str => "str".to_string(),
-                    Type::String => "string".to_string(),
                     Type::I32 => "i32".to_string(), // Primitive types may have methods
                     Type::I64 => "i64".to_string(),
                     Type::F32 => "f32".to_string(),
@@ -617,6 +616,9 @@ impl<'a> ExpressionAnalyzer<'a> {
                         | Type::ThreadSafe(inner)
                         | Type::Array(inner, _) => {
                             Ok(*inner) // Return the inner type
+                        }
+                        Type::Custom(name, generics) if name == "vec::Vector<>" && !generics.is_empty() => {
+                            Ok(generics[0].clone())
                         }
                         _ => self.analysis_info.semantic_error(
                             "Indexing only supported on array, pointer, or reference types".into(),

@@ -37,11 +37,7 @@ pub fn compile_stmt(
             let final_ty = expected_ty.as_ref().or(value.ty.as_ref());
 
             let (ty_tokens, final_val) = if let Some(pt) = final_ty {
-                let ct = if matches!(pt, Type::Str) {
-                    quote!(&str)
-                } else {
-                    compile_type_ext(pt, target_obj)
-                };
+                let ct = compile_type_ext(pt, target_obj);
 
                 let mut val_src = if returns_ref {
                     quote! { (#val_raw).clone() }
@@ -59,7 +55,7 @@ pub fn compile_stmt(
                     Type::BoxPtr(_) if !matches!(value.ty, Some(Type::BoxPtr(_))) => {
                         quote! { Box::new((&#val_src).as_val()) }
                     }
-                    _ => val_src,
+                    _ => quote! { (&#val_src).as_val() },
                 };
                 (quote!(: #ct), val_managed)
             } else {
@@ -98,9 +94,11 @@ pub fn compile_stmt(
             let e = compile_expr(expr, target_obj, false);
             if is_last {
                 if let Some(Type::Result(_, _)) = expected_ret {
-                    quote! { Ok(#e) }
+                    quote! { Ok((&#e).as_val()) }
                 } else if matches!(expected_ret, Some(Type::Unit)) {
                     quote! { { #e; () } }
+                } else if expected_ret.is_some() {
+                    quote! { (&#e).as_val() }
                 } else {
                     quote! { #e }
                 }
@@ -112,9 +110,9 @@ pub fn compile_stmt(
             if let Some(e) = expr {
                 let e_compiled = compile_expr(e, target_obj, false);
                 if let Some(Type::Result(_, _)) = expected_ret {
-                    quote! { return Ok(#e_compiled); }
+                    quote! { return Ok((&#e_compiled).as_val()); }
                 } else {
-                    quote! { return #e_compiled; }
+                    quote! { return (&#e_compiled).as_val(); }
                 }
             } else {
                 if let Some(Type::Result(_, _)) = expected_ret {

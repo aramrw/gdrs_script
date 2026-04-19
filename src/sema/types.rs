@@ -61,11 +61,11 @@ impl TypeInfo {
         );
         type_info.functions.insert(
             "fs::read_to_string".to_string(),
-            (vec![(Type::Str, ArgKind::Value)], Some(Type::String)),
+            (vec![(Type::Str, ArgKind::Value)], Some(Type::Str)),
         );
         type_info
             .functions
-            .insert("io::readline".to_string(), (vec![], Some(Type::String)));
+            .insert("io::readline".to_string(), (vec![], Some(Type::Str)));
         type_info.functions
             .insert("io::println".to_string(), (vec![(Type::Str, ArgKind::Value)], None));
 
@@ -86,59 +86,59 @@ impl TypeInfo {
                 vec![(Type::Ref(Box::new(Type::Str), false), ArgKind::Ref), (Type::Str, ArgKind::Value)],
                 Some(Type::Custom(
                     "std::vec::Vector<>".into(),
-                    vec![Type::String],
+                    vec![Type::Str],
                 )),
             ),
         );
 
         type_info.functions
-            .insert("string::new".to_string(), (vec![], Some(Type::String)));
+            .insert("string::new".to_string(), (vec![], Some(Type::Str)));
         type_info.functions.insert(
             "string::len".to_string(),
             (
-                vec![(Type::Ref(Box::new(Type::String), false), ArgKind::Ref)],
+                vec![(Type::Ref(Box::new(Type::Str), false), ArgKind::Ref)],
                 Some(Type::I32),
             ),
         );
         type_info.functions.insert(
             "string::contains".to_string(),
             (
-                vec![(Type::Ref(Box::new(Type::String), false), ArgKind::Ref), (Type::Str, ArgKind::Value)],
+                vec![(Type::Ref(Box::new(Type::Str), false), ArgKind::Ref), (Type::Str, ArgKind::Value)],
                 Some(Type::Bool),
             ),
         );
         type_info.functions.insert(
             "string::split".to_string(),
             (
-                vec![(Type::Ref(Box::new(Type::String), false), ArgKind::Ref), (Type::Str, ArgKind::Value)],
+                vec![(Type::Ref(Box::new(Type::Str), false), ArgKind::Ref), (Type::Str, ArgKind::Value)],
                 Some(Type::Custom(
                     "std::vec::Vector<>".into(),
-                    vec![Type::String],
+                    vec![Type::Str],
                 )),
             ),
         );
         type_info.functions.insert(
             "string::to_str".to_string(),
             (
-                vec![(Type::Ref(Box::new(Type::String), false), ArgKind::Ref)],
+                vec![(Type::Ref(Box::new(Type::Str), false), ArgKind::Ref)],
                 Some(Type::Str),
             ),
         );
         type_info.functions.insert(
             "i32::to_string".to_string(),
-            (vec![(Type::Ref(Box::new(Type::I32), false), ArgKind::Ref)], Some(Type::String)),
+            (vec![(Type::Ref(Box::new(Type::I32), false), ArgKind::Ref)], Some(Type::Str)),
         );
         type_info.functions.insert(
             "i64::to_string".to_string(),
-            (vec![(Type::Ref(Box::new(Type::I64), false), ArgKind::Ref)], Some(Type::String)),
+            (vec![(Type::Ref(Box::new(Type::I64), false), ArgKind::Ref)], Some(Type::Str)),
         );
         type_info.functions.insert(
             "f32::to_string".to_string(),
-            (vec![(Type::Ref(Box::new(Type::F32), false), ArgKind::Ref)], Some(Type::String)),
+            (vec![(Type::Ref(Box::new(Type::F32), false), ArgKind::Ref)], Some(Type::Str)),
         );
         type_info.functions.insert(
             "f64::to_string".to_string(),
-            (vec![(Type::Ref(Box::new(Type::F64), false), ArgKind::Ref)], Some(Type::String)),
+            (vec![(Type::Ref(Box::new(Type::F64), false), ArgKind::Ref)], Some(Type::Str)),
         );
         type_info.functions.insert(
             "f32::powi".to_string(),
@@ -155,7 +155,7 @@ impl TypeInfo {
         type_info.functions.insert(
             "string::append".to_string(),
             (
-                vec![(Type::Ref(Box::new(Type::String), true), ArgKind::MutRef), (Type::Str, ArgKind::Value)],
+                vec![(Type::Ref(Box::new(Type::Str), true), ArgKind::MutRef), (Type::Str, ArgKind::Value)],
                 None,
             ),
         );
@@ -165,40 +165,42 @@ impl TypeInfo {
             (vec![], Some(Type::I32)),
         );
         type_info.functions.insert(
-            "std::vec::Vector<>::push".to_string(),
+            "vec::Vector<>::push".to_string(),
             (vec![(Type::Ref(Box::new(Type::Generic("T".into())), false), ArgKind::Ref)], None),
         );
         type_info.functions.insert(
-            "std::vec::Vector<>::pop".to_string(),
-            (vec![], Some(Type::Custom("std::option::Option<>".into(), vec![Type::Generic("T".into())]))),
+            "vec::Vector<>::pop".to_string(),
+            (vec![], Some(Type::Custom("option::Option<>".into(), vec![Type::Generic("T".into())]))),
         );
         type_info.functions.insert(
-            "std::vec::Vector<>::get".to_string(),
+            "vec::Vector<>::get".to_string(),
             (vec![(Type::Ref(Box::new(Type::I32), false), ArgKind::Ref)], Some(Type::Generic("T".into()))),
         );
         type_info.functions.insert(
-            "std::vec::Vector<>::len".to_string(),
+            "vec::Vector<>::len".to_string(),
             (vec![], Some(Type::I32)),
         );
         // Register Option enum
         let mut option_variants = HashMap::new();
         option_variants.insert("Some".to_string(), vec![Type::Generic("T".into())]);
         option_variants.insert("None".to_string(), vec![]);
-        type_info.enums.insert("std::option::Option<>".to_string(), (option_variants, vec![("T".into(), vec![])]));
-        type_info.aliases.insert("Option".to_string(), "std::option::Option".to_string());
+        type_info.enums.insert("option::Option<>".to_string(), (option_variants, vec![("T".into(), vec![])]));
+        type_info.aliases.insert("Option".to_string(), "option::Option".to_string());
+        type_info.aliases.insert("Vec".to_string(), "vec::Vector".to_string());
+        type_info.aliases.insert("Vector".to_string(), "vec::Vector".to_string());
 
         type_info.functions.insert(
-            "std::vec::Vector<>::new".to_string(),
-            (vec![], Some(Type::Custom("std::vec::Vector<>".into(), vec![Type::Generic("T".into())]))),
+            "vec::Vector<>::new".to_string(),
+            (vec![], Some(Type::Custom("vec::Vector<>".into(), vec![Type::Generic("T".into())]))),
         );
 
         type_info.functions.insert(
-            "std::option::Option<>::Some".to_string(),
-            (vec![(Type::Generic("T".into()), ArgKind::Value)], Some(Type::Custom("std::option::Option<>".into(), vec![Type::Generic("T".into())]))),
+            "option::Option<>::Some".to_string(),
+            (vec![(Type::Generic("T".into()), ArgKind::Value)], Some(Type::Custom("option::Option<>".into(), vec![Type::Generic("T".into())]))),
         );
         type_info.functions.insert(
-            "std::option::Option<>::None".to_string(),
-            (vec![], Some(Type::Custom("std::option::Option<>".into(), vec![Type::Generic("T".into())]))),
+            "option::Option<>::None".to_string(),
+            (vec![], Some(Type::Custom("option::Option<>".into(), vec![Type::Generic("T".into())]))),
         );
 
         type_info
@@ -224,6 +226,9 @@ impl TypeInfo {
             }
             Type::Array(inner, size) => Type::Array(Box::new(self.resolve_type(inner, prefix)), *size),
             Type::Custom(name, generics) => {
+                if name == "String" || name == "sr_string" || name == "string" {
+                    return Type::Str;
+                }
                 let mut resolved_name = self.aliases.get(name).cloned().unwrap_or_else(|| {
                     if !name.contains("::") && !prefix.is_empty() {
                         format!("{}::{}", prefix, name)
@@ -392,13 +397,16 @@ impl TypeInfo {
                     self.collect_decls(inner, &new_prefix)?;
                 }
                 Decl::Use(u) => {
-                    if u.is_crate {
+                    if u.is_rust {
                         if let Some(crate_name) = u.path.first() {
                             self.phantom_types.insert(crate_name.clone());
                         }
                     }
                     if !u.path.is_empty() {
-                        let full_path = u.path.join("::");
+                        let mut full_path = u.path.join("::");
+                        if full_path.starts_with("stext::") {
+                            full_path = full_path.strip_prefix("stext::").unwrap().to_string();
+                        }
                         let last_part = u.path.last().unwrap();
                         if last_part != "mod" {
                             // Use alias for the last part of the path

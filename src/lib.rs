@@ -37,10 +37,10 @@ pub fn resolve_module(
         return Some(mod_sr_path);
     }
 
-    // 2. Try in std directory (with or without 'std' prefix)
-    if let Some(std) = std_path {
-        let mut path = std.to_path_buf();
-        let skip = if parts.first().map(|s| s.as_str()) == Some("std") { 1 } else { 0 };
+    // 2. Try in stext directory (with or without 'stext' prefix)
+    if let Some(stext) = std_path {
+        let mut path = stext.to_path_buf();
+        let skip = if parts.first().map(|s| s.as_str()) == Some("stext") { 1 } else { 0 };
         for part in &parts[skip..] {
             path.push(part);
         }
@@ -68,7 +68,7 @@ pub fn run_compiler(file_path: &str) -> Result<(), Box<dyn std::error::Error>> {
     loaded.insert(root_path.clone());
 
     let cwd = env::current_dir().unwrap();
-    let std_path = cwd.join("std");
+    let std_path = cwd.join("stext");
     let std_path = if std_path.exists() {
         Some(std_path)
     } else {
@@ -95,7 +95,7 @@ pub fn run_compiler(file_path: &str) -> Result<(), Box<dyn std::error::Error>> {
                 let mut deps = Vec::new();
                 for decl in &program.declarations {
                     if let Decl::Use(u) = decl {
-                        if u.is_crate {
+                        if u.is_rust {
                             continue;
                         }
                         let mut found = false;
@@ -171,7 +171,7 @@ pub fn reconstruct(
     let mut decls = Vec::new();
 
     for (mod_name, dep_path) in deps {
-        let name_to_use = mod_name.strip_prefix("std::").unwrap_or(mod_name).to_string();
+        let name_to_use = mod_name.strip_prefix("stext::").unwrap_or(mod_name).to_string();
         let dep_decls = reconstruct(dep_path, processed, visited);
         if !dep_decls.is_empty() {
             let parts: Vec<&str> = name_to_use.split("::").collect();

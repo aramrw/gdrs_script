@@ -634,7 +634,7 @@ where
 {
     just(Token::Use)
         .ignore_then(
-            just(Token::Ident("crate".to_string()))
+            just(Token::Rust)
                 .then(just(Token::DoubleColon))
                 .or_not()
                 .then(
@@ -659,12 +659,12 @@ where
                 ))),
         )
         .then_ignore(just(Token::Semicolon).or_not())
-        .map(|((is_crate, path), (items, is_wildcard))| {
+        .map(|((is_rust, path), (items, is_wildcard))| {
             Decl::Use(UseDecl {
                 path,
                 items,
                 is_wildcard,
-                is_crate: is_crate.is_some(),
+                is_rust: is_rust.is_some(),
             })
         })
 }

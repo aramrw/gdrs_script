@@ -288,7 +288,7 @@ pub fn compile_decls(decls: &[Decl], tokens: &mut TokenStream) {
                 let mut path_tokens = Vec::new();
                 for (i, part) in u.path.iter().enumerate() {
                     let id = quote::format_ident!("{}", part);
-                    if i == 0 && u.is_crate {
+                    if i == 0 && u.is_rust {
                         path_tokens.push(quote!(::#id));
                     } else {
                         path_tokens.push(quote!(#id));

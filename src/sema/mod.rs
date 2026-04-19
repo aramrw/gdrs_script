@@ -39,6 +39,9 @@ impl SemanticAnalyzer {
             match decl {
                 Decl::Function(func) => {
                     self.analysis_info.symbols.clear();
+                    self.analysis_info.await_points.clear();
+                    self.analysis_info.var_declarations.clear();
+                    self.analysis_info.scope_depth = 0;
                     
                     let old_gens = self.type_info.generic_params.clone();
                     for (name, bounds) in &func.generics {
@@ -74,6 +77,10 @@ impl SemanticAnalyzer {
                     // Analyze methods within the impl block
                     for func in &mut imp.functions {
                         self.analysis_info.symbols.clear();
+                        self.analysis_info.await_points.clear();
+                        self.analysis_info.var_declarations.clear();
+                        self.analysis_info.scope_depth = 0;
+
                         // Add parameters to symbols
                         for param in &func.params {
                             let ty = if param.name == "self" {

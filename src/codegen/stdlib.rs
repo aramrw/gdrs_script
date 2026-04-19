@@ -576,6 +576,10 @@ pub(crate) fn generate_solar_std(has_macroquad: bool) -> TokenStream {
         pub fn new() -> String { String::new() }
     }
 
+    pub fn solar_typeof<T>(_: &T) -> &'static str {
+        ::std::any::type_name::<T>()
+    }
+
         pub mod sr_math {
         pub fn pi() -> f32 { ::std::f32::consts::PI }
         pub fn e() -> f32 { ::std::f32::consts::E }

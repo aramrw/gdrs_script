@@ -189,11 +189,11 @@ pub(crate) fn compile_id_ext(name: &str, is_expr: bool) -> TokenStream {
         let rest_tokens = crate::compiler::paths::format_path_parts(&parts[1..]);
 
         let mut res = match first {
-            // ZERO-COST ABSTRACTIONS: Direct access to Rust's std library!
-            "std" | "rust" => quote!(::std::#( #rest_tokens )::*),
+            // ZERO-COST ABSTRACTIONS: Direct access to Rust's libraries!
+            "rust" => quote!(::#( #rest_tokens )::*),
 
-            // External crates via `crate::`
-            "crate" => quote!(::#( #rest_tokens )::*),
+            // Solar standard library extensions
+            "stext" => quote!(crate::#( #rest_tokens )::*),
 
             // Solar standard library mapped directly to the active crate
             "solar" => quote!(crate::#( #rest_tokens )::*),
@@ -251,17 +251,12 @@ pub fn compile_path(path: &[PathPart], target_obj: Option<&String>, is_expr: boo
     let mut start_idx = 0;
     
     if let Some(first) = path.first() {
-        if first.name == "std" {
-            if path.len() > 1 {
-                let second = &path[1].name;
-                if ["vec", "option", "fs", "io", "math", "string", "random"].contains(&second.as_str()) {
-                    parts.push(quote!(crate));
-                } else {
-                    parts.push(quote!(::std));
-                }
-            } else {
-                parts.push(quote!(::std));
-            }
+        if first.name == "stext" {
+            parts.push(quote!(crate));
+            start_idx = 1;
+        } else if first.name == "rust" {
+            // "rust::" prefix means use native rust path directly, optionally keeping "std::"
+            // We just skip the "rust" part. The rest will be formatted as a normal rust path.
             start_idx = 1;
         }
     }
@@ -365,12 +360,12 @@ fn wrap_expr_for_ref(expr: &Expr, expected_ty: Option<&Type>, target_obj: Option
             }
             Type::Ref(_, _) => tokens, // Already a ref
             _ => {
-                // If it's a Custom or Array type, it's almost certainly expected as a reference in a Solar function
+                // ALL Solar function parameters are passed by reference in the generated Rust.
                 let is_ref_expected = expected_ty.map_or(true, |et| {
                     match et {
                         Type::Ref(_, _) => true,
-                        Type::Custom(_, _) | Type::Array(_, _) | Type::Managed(_) | Type::ThreadSafe(_) | Type::BoxPtr(_) | Type::Generic(_) => true,
-                        _ => false,
+                        Type::Any => false, // For phantom types, we might want as_val()
+                        _ => true,
                     }
                 });
                 if is_ref_expected {

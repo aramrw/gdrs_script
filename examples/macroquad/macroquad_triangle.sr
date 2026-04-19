@@ -56,9 +56,10 @@ impl Triangle:
         self.angle = self.angle + 0.01
         
         // Move point 'a' toward the mouse position smoothly
-        var mouse = mouse_position_vec2()
-        self.a.x = self.a.x (mouse.x - self.a.x) * 0.1
-        self.a.y = self.a.x (mouse.y - self.a.y) * 0.1
+        var mouse_pos = mouse_position()
+        var mouse = vec2(mouse_pos.0, mouse_pos.1)
+        self.a.x = self.a.x + (mouse.x - self.a.x) * 0.1
+        self.a.y = self.a.y + (mouse.y - self.a.y) * 0.1
 
 async fn gameloop(mut t: Triangle):
     while true:

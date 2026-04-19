@@ -1,0 +1,27 @@
+fn print_str(s: str):
+    println!(s)
+
+fn print_ref(s: &str):
+    println!(s)
+
+fn get_hello() -> str:
+    return "hello from function"
+
+fn main():
+    var s = "hello"
+    print_str(s)
+    print_ref(s)
+    
+    var mut m = "mutable"
+    print_str(m)
+    print_ref(m)
+    
+    print_str("literal")
+    print_ref("literal")
+    
+    var string_obj: string = "from string obj"
+    print_str(string_obj)
+    print_ref(string_obj)
+    
+    var ret = get_hello()
+    println!(ret)

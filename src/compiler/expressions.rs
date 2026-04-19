@@ -32,8 +32,8 @@ pub fn compile_expr(expr: &Expr, target_obj: Option<&String>, is_mut: bool) -> T
 
             // Special handling for string concatenation
             if *op == BinaryOp::Add {
-                let l_is_str = l_ty.map_or(false, |t| matches!(t, Type::String | Type::Str));
-                let r_is_str = r_ty.map_or(false, |t| matches!(t, Type::String | Type::Str));
+                let l_is_str = l_ty.map_or(false, |t| matches!(t, Type::Str));
+                let r_is_str = r_ty.map_or(false, |t| matches!(t, Type::Str));
 
                 if l_is_str || r_is_str {
                     return quote! { (#l).solar_add(&#r) };
@@ -360,19 +360,8 @@ pub fn compile_expr(expr: &Expr, target_obj: Option<&String>, is_mut: bool) -> T
         ExprKind::MacroCall(name, args) => {
             let name_id = quote::format_ident!("{}", name);
             if name == "typeof" {
-                if let Some(ty_obj) = args[0].ty.as_ref() {
-                    match ty_obj {
-                        Type::Generic(g) => {
-                            let g_id = quote::format_ident!("{}", g);
-                            return quote! { crate::SolarCow::Owned(::std::any::type_name::<#g_id>().to_string()) };
-                        }
-                        _ => {
-                            let ty = format!("{:?}", ty_obj);
-                            return quote! { crate::SolarCow::Borrowed(#ty) };
-                        }
-                    }
-                }
-                return quote! { crate::SolarCow::Borrowed("unknown") };
+                let e = compile_expr(&args[0], target_obj, false);
+                return quote! { crate::SolarCow::Borrowed(crate::solar_typeof(&#e)) };
             }
 
             if name == "println" || name == "print" || name == "log" || name == "logln" || name == "dbg"

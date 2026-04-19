@@ -12,7 +12,6 @@ pub fn compile_type_ext(ty: &Type, target_obj: Option<&String>) -> TokenStream {
         Type::F64 => quote!(f64),
         Type::Bool => quote!(bool),
         Type::Str => quote!(::std::string::String),
-        Type::String => quote!(::std::string::String),
         Type::File => quote!(::std::fs::File),
         Type::BoxPtr(inner) => {
             let t = compile_type_ext(inner, target_obj);
@@ -31,11 +30,15 @@ pub fn compile_type_ext(ty: &Type, target_obj: Option<&String>) -> TokenStream {
             }
         }
         Type::Ref(inner, mutable) => {
-            let t = compile_type_ext(inner, target_obj);
-            if *mutable {
-                quote!(&mut #t)
+            if !*mutable && matches!(**inner, Type::Str) {
+                quote!(&str)
             } else {
-                quote!(&#t)
+                let t = compile_type_ext(inner, target_obj);
+                if *mutable {
+                    quote!(&mut #t)
+                } else {
+                    quote!(&#t)
+                }
             }
         }
         Type::Managed(inner) => {

@@ -1,7 +1,12 @@
 rust dependency macroquad = "0.4"
 
-use crate::macroquad::prelude::*;
-use crate::std::vec::Vec;
+use rust::macroquad::prelude::*;
+use rust::std::vec::Vec;
+
+//const FONT_SIZE: f32 = 15.0
+
+fn rbutton(text: str):
+     draw_text(text, 20.0, 40.0, FONT_SIZE, RED)
 
 fn draw_star_burst():
     var center = vec2(screen_width() / 2.0, screen_height() / 2.0)
@@ -23,5 +28,5 @@ async fn main():
     loop:
         clear_background(BLACK)
         draw_star_burst()
-        //draw_circle(250.0, 250.0, 30.0, RED)
+        rbutton("cool red text")
         next_frame().await
