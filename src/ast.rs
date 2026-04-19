@@ -3,7 +3,14 @@ use crate::lexer::Span;
 #[derive(Debug, Clone, PartialEq)]
 pub enum Type {
     Unit,
-    I32, I64, F32, F64, Bool, Str, String, File,
+    I32,
+    I64,
+    F32,
+    F64,
+    Bool,
+    Str,
+    String,
+    File,
     Array(Box<Type>, usize),
     BoxPtr(Box<Type>),
     RawPtr(Box<Type>, bool),
@@ -23,12 +30,25 @@ pub enum Type {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum BinaryOp {
-    Add, Subtract, Multiply, Divide, GreaterThan, LessThan, GreaterThanOrEqual, LessThanOrEqual, Equal,
+    Add,
+    Subtract,
+    Multiply,
+    Divide,
+    GreaterThan,
+    LessThan,
+    GreaterThanOrEqual,
+    LessThanOrEqual,
+    Equal,
+    Modulo,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AllocKind {
-    Box, RawMut, RawConst, Rc, Arc,
+    Box,
+    RawMut,
+    RawConst,
+    Rc,
+    Arc,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -46,7 +66,10 @@ pub struct Expr {
 }
 
 #[derive(Debug, Clone, PartialEq)]
-pub struct PathPart { pub name: String, pub generics: Vec<Type> }
+pub struct PathPart {
+    pub name: String,
+    pub generics: Vec<Type>,
+}
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum ExprKind {
@@ -60,10 +83,29 @@ pub enum ExprKind {
     Variable(Vec<PathPart>),
     Binary(Box<Expr>, BinaryOp, Box<Expr>),
     Tuple(Vec<Expr>),
-    Call(Vec<PathPart>, Vec<Expr>, Option<String>, Option<Vec<ArgKind>>, Option<Vec<Type>>),
+    Call(
+        Vec<PathPart>,
+        Vec<Expr>,
+        Option<String>,
+        Option<Vec<ArgKind>>,
+        Option<Vec<Type>>,
+    ),
     MacroCall(String, Vec<Expr>),
-    MethodCall(Box<Expr>, String, Vec<Expr>, Option<String>, Option<Vec<ArgKind>>, Option<Vec<Type>>),
-    StructLiteral { path: Vec<PathPart>, fields: Vec<(String, Expr)>, resolved_name: Option<String> },
+    Array(Vec<Expr>),
+    Block(Vec<Stmt>),
+    MethodCall(
+        Box<Expr>,
+        String,
+        Vec<Expr>,
+        Option<String>,
+        Option<Vec<ArgKind>>,
+        Option<Vec<Type>>,
+    ),
+    StructLiteral {
+        path: Vec<PathPart>,
+        fields: Vec<(String, Expr)>,
+        resolved_name: Option<String>,
+    },
     MemberAccess(Box<Expr>, String),
     IndexAccess(Box<Expr>, Box<Expr>),
     Alloc(Box<Expr>, AllocKind),
@@ -85,21 +127,44 @@ pub struct Stmt {
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum StmtKind {
-    VarDecl { name: String, is_mutable: bool, ty: Option<Type>, value: Expr },
-    Assign { target: Expr, value: Expr },
-    If { condition: Expr, then_branch: Box<Stmt>, else_branch: Option<Box<Stmt>> },
-    While { condition: Expr, body: Box<Stmt> },
-    Loop { body: Box<Stmt> },
+    VarDecl {
+        name: String,
+        is_mutable: bool,
+        ty: Option<Type>,
+        value: Expr,
+    },
+    Assign {
+        target: Expr,
+        value: Expr,
+    },
+    If {
+        condition: Expr,
+        then_branch: Box<Stmt>,
+        else_branch: Option<Box<Stmt>>,
+    },
+    While {
+        condition: Expr,
+        body: Box<Stmt>,
+    },
+    Loop {
+        body: Box<Stmt>,
+    },
     Break(Option<Expr>),
     Block(Vec<Stmt>),
     UnsafeBlock(Vec<Stmt>),
     ExprStmt(Expr),
     Return(Option<Expr>),
-    Match { expr: Expr, arms: Vec<Arm> },
+    Match {
+        expr: Expr,
+        arms: Vec<Arm>,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq)]
-pub struct Arm { pub pattern: Pattern, pub body: Stmt }
+pub struct Arm {
+    pub pattern: Pattern,
+    pub body: Stmt,
+}
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Pattern {
@@ -109,16 +174,16 @@ pub enum Pattern {
 }
 
 #[derive(Debug, Clone, PartialEq)]
-pub struct Field { 
-    pub name: String, 
+pub struct Field {
+    pub name: String,
     pub ty: Type,
     pub attributes: Vec<String>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
-pub struct Param { 
-    pub name: String, 
-    pub ty: Type, 
+pub struct Param {
+    pub name: String,
+    pub ty: Type,
     pub is_mutable: bool,
 }
 
@@ -144,8 +209,8 @@ pub struct ObjectDecl {
 }
 
 #[derive(Debug, Clone, PartialEq)]
-pub struct Variant { 
-    pub name: String, 
+pub struct Variant {
+    pub name: String,
     pub types: Vec<Type>,
     pub attributes: Vec<String>,
 }
@@ -178,9 +243,9 @@ pub struct ImplDecl {
 #[derive(Debug, Clone, PartialEq)]
 pub struct UseDecl {
     pub path: Vec<String>,
-    pub items: Vec<String>, 
-    pub is_wildcard: bool,  // Support ::* 
-    pub is_crate: bool,     // If it starts with 'crate::'
+    pub items: Vec<String>,
+    pub is_wildcard: bool, // Support ::*
+    pub is_crate: bool,    // If it starts with 'crate::'
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -202,4 +267,6 @@ pub enum Decl {
 }
 
 #[derive(Debug, Clone, PartialEq)]
-pub struct Program { pub declarations: Vec<Decl> }
+pub struct Program {
+    pub declarations: Vec<Decl>,
+}

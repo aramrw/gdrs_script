@@ -15,10 +15,7 @@ pub struct ExpressionAnalyzer<'a> {
 }
 
 impl<'a> ExpressionAnalyzer<'a> {
-    pub fn new(
-        analysis_info: &'a mut AnalysisInfo,
-        type_info: &'a mut TypeInfo,
-    ) -> Self {
+    pub fn new(analysis_info: &'a mut AnalysisInfo, type_info: &'a mut TypeInfo) -> Self {
         Self {
             analysis_info,
             type_info,
@@ -99,6 +96,15 @@ impl<'a> ExpressionAnalyzer<'a> {
                         | BinaryOp::GreaterThanOrEqual
                         | BinaryOp::LessThanOrEqual
                         | BinaryOp::Equal => Ok(Type::Bool),
+                        BinaryOp::Modulo => {
+                            if l_base != Type::I32 && l_base != Type::I64 {
+                                return self.analysis_info.semantic_error(
+                                    "Modulo (%) can only be used on integers (for now)".into(),
+                                    span,
+                                );
+                            }
+                            Ok(l_base)
+                        }
                         _ => Ok(l_base), // For other ops like +, -, *, /, return the base type
                     }
                 }
@@ -123,6 +129,45 @@ impl<'a> ExpressionAnalyzer<'a> {
                     Ok(Type::I32) // Default to I32 or Unit for other macros
                 }
             }
+            ExprKind::Array(items) => {
+                if items.is_empty() {
+                    Ok(Type::Array(Box::new(Type::Any), 0))
+                } else {
+                    let first_ty = self.analyze_expr(&mut items[0])?;
+                    for item in items.iter_mut().skip(1) {
+                        let ty = self.analyze_expr(item)?;
+                        if !self.analysis_info.types_equal(&first_ty, &ty)
+                            && first_ty != Type::Any
+                            && ty != Type::Any
+                        {
+                            return self.analysis_info.semantic_error(
+                                format!(
+                                    "Mismatched types in array literal: {:?} and {:?}",
+                                    first_ty, ty
+                                ),
+                                span,
+                            );
+                        }
+                    }
+                    Ok(Type::Array(Box::new(first_ty), items.len()))
+                }
+            }
+            ExprKind::Block(stmts) => {
+                use crate::sema::analysis::statements::StatementAnalyzer;
+                let mut last_ty = Type::Unit;
+                {
+                    let mut sa = StatementAnalyzer::new(self.analysis_info, self.type_info);
+                    for stmt in stmts {
+                        sa.analyze_stmt(stmt)?;
+                        if let StmtKind::ExprStmt(ref e) = stmt.kind {
+                            last_ty = e.ty.clone().unwrap_or(Type::Unit);
+                        } else {
+                            last_ty = Type::Unit;
+                        }
+                    }
+                }
+                Ok(last_ty)
+            }
             ExprKind::Call(path, args, resolved_name, arg_kinds, param_types_field) => {
                 let name = self.analysis_info.path_to_string(path);
                 //println!("DEBUG analyze Call name={}, current_prefix={}", name, self.analysis_info.current_prefix);
@@ -130,18 +175,12 @@ impl<'a> ExpressionAnalyzer<'a> {
                 // Handle special calls like Ok() and Err()
                 if name == "Ok" {
                     let val_ty = self.analyze_expr(&mut args[0])?;
-                    let ty = Type::Result(
-                        Box::new(val_ty),
-                        Box::new(Type::Generic("E".into())),
-                    );
+                    let ty = Type::Result(Box::new(val_ty), Box::new(Type::Generic("E".into())));
                     expr.ty = Some(ty.clone());
                     return Ok(ty);
                 } else if name == "Err" {
                     let err_ty = self.analyze_expr(&mut args[0])?;
-                    let ty = Type::Result(
-                        Box::new(Type::Generic("T".into())),
-                        Box::new(err_ty),
-                    );
+                    let ty = Type::Result(Box::new(Type::Generic("T".into())), Box::new(err_ty));
                     expr.ty = Some(ty.clone());
                     return Ok(ty);
                 } else if name == "array_init" {
@@ -190,10 +229,10 @@ impl<'a> ExpressionAnalyzer<'a> {
                 let (resolved_func_name, params, ret_type) = found_name_and_ret.unwrap();
                 //println!("DEBUG analyze Call resolved_func_name={}", resolved_func_name);
                 *resolved_name = Some(resolved_func_name.clone());
-                
+
                 let p_types: Vec<Type> = params.iter().map(|(t, _)| t.clone()).collect();
                 let p_kinds: Vec<ArgKind> = params.iter().map(|(_, k)| *k).collect();
-                
+
                 *param_types_field = Some(p_types);
                 *arg_kinds = Some(p_kinds);
 
@@ -204,10 +243,19 @@ impl<'a> ExpressionAnalyzer<'a> {
 
                 Ok(ret_type.unwrap_or(Type::I32)) // Simplified return type
             }
-            ExprKind::MethodCall(lhs, name, args, resolved_obj_name, arg_kinds, param_types_field) => {
+            ExprKind::MethodCall(
+                lhs,
+                name,
+                args,
+                resolved_obj_name,
+                arg_kinds,
+                param_types_field,
+            ) => {
                 let mut lhs_ty = self.analyze_expr(lhs)?;
                 // println!("DEBUG analyze MethodCall name={}, lhs_ty={:?}", name, lhs_ty);
-                let resolved_lhs_ty = self.type_info.resolve_type(&lhs_ty, &self.analysis_info.current_prefix);
+                let resolved_lhs_ty = self
+                    .type_info
+                    .resolve_type(&lhs_ty, &self.analysis_info.current_prefix);
 
                 if resolved_lhs_ty == Type::Any {
                     for arg in args.iter_mut() {
@@ -286,10 +334,10 @@ impl<'a> ExpressionAnalyzer<'a> {
                 {
                     let p_types: Vec<Type> = params.iter().map(|(t, _)| t.clone()).collect();
                     let p_kinds: Vec<ArgKind> = params.iter().map(|(_, k)| *k).collect();
-                    
+
                     *param_types_field = Some(p_types);
                     *arg_kinds = Some(p_kinds);
-                    
+
                     let ty = ret_type.unwrap_or(Type::I32);
                     expr.ty = Some(ty.clone());
                     return Ok(ty);
@@ -310,14 +358,15 @@ impl<'a> ExpressionAnalyzer<'a> {
             } => {
                 let name = self.analysis_info.path_to_string(path);
                 let is_phantom = path.iter().any(|p| self.type_info.is_phantom_type(&p.name));
-                
+
                 // Attempt to resolve struct name
                 let mut found = false;
-                let name_to_lookup = if !name.contains("::") && !self.analysis_info.current_prefix.is_empty() {
-                    format!("{}::{}", self.analysis_info.current_prefix, name)
-                } else {
-                    name.clone()
-                };
+                let name_to_lookup =
+                    if !name.contains("::") && !self.analysis_info.current_prefix.is_empty() {
+                        format!("{}::{}", self.analysis_info.current_prefix, name)
+                    } else {
+                        name.clone()
+                    };
 
                 if self.type_info.objects.contains_key(&name_to_lookup) {
                     *resolved_name = Some(name_to_lookup.clone());
@@ -338,10 +387,9 @@ impl<'a> ExpressionAnalyzer<'a> {
                         return Ok(ty);
                     }
 
-                    return self.analysis_info.semantic_error(
-                        format!("Undeclared object type '{}'", name),
-                        span,
-                    );
+                    return self
+                        .analysis_info
+                        .semantic_error(format!("Undeclared object type '{}'", name), span);
                 }
 
                 let final_name = resolved_name.as_ref().unwrap().clone();
@@ -359,7 +407,9 @@ impl<'a> ExpressionAnalyzer<'a> {
                 if lhs_ty == Type::Any {
                     Ok(Type::Any)
                 } else {
-                    let resolved_lhs = self.type_info.resolve_type(&lhs_ty, &self.analysis_info.current_prefix);
+                    let resolved_lhs = self
+                        .type_info
+                        .resolve_type(&lhs_ty, &self.analysis_info.current_prefix);
                     let actual_ty = self.analysis_info.deref_type(&resolved_lhs);
 
                     match actual_ty {
@@ -369,13 +419,20 @@ impl<'a> ExpressionAnalyzer<'a> {
                                     Ok(ty.clone())
                                 } else {
                                     self.analysis_info.semantic_error(
-                                        format!("Tuple index {} out of bounds (len: {})", idx, types.len()),
+                                        format!(
+                                            "Tuple index {} out of bounds (len: {})",
+                                            idx,
+                                            types.len()
+                                        ),
                                         span,
                                     )
                                 }
                             } else {
                                 self.analysis_info.semantic_error(
-                                    format!("Tuple access must be a numeric index, found '{}'", name),
+                                    format!(
+                                        "Tuple access must be a numeric index, found '{}'",
+                                        name
+                                    ),
                                     span,
                                 )
                             }
@@ -517,7 +574,9 @@ impl<'a> ExpressionAnalyzer<'a> {
             ExprKind::Cast(inner, ty) => {
                 self.analyze_expr(inner)?;
                 // Resolve the target type. Requires resolve_type.
-                let resolved_ty = self.type_info.resolve_type(ty, &self.analysis_info.current_prefix);
+                let resolved_ty = self
+                    .type_info
+                    .resolve_type(ty, &self.analysis_info.current_prefix);
                 Ok(resolved_ty)
             }
         }?;
@@ -532,9 +591,18 @@ impl<'a> ExpressionAnalyzer<'a> {
                 self.refine_expr(lhs)?;
                 self.refine_expr(rhs)?;
             }
-            ExprKind::Call(_, args, _, _, _) | ExprKind::MacroCall(_, args) => {
+            ExprKind::Call(_, args, _, _, _)
+            | ExprKind::MacroCall(_, args)
+            | ExprKind::Array(args) => {
                 for arg in args {
                     self.refine_expr(arg)?;
+                }
+            }
+            ExprKind::Block(stmts) => {
+                use crate::sema::analysis::statements::StatementAnalyzer;
+                let mut sa = StatementAnalyzer::new(self.analysis_info, self.type_info);
+                for stmt in stmts {
+                    sa.refine_stmt(stmt)?;
                 }
             }
             ExprKind::MethodCall(lhs, _, args, _, _, _) => {

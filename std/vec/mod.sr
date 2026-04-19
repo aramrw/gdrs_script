@@ -1,11 +1,29 @@
 obj Vector<T>:
     raw: *box RawVector<T>
 
+obj Vec<T>:
+    inner: Vector<T>
+
+impl<T> Vec<T>:
+    fn new(val: T) -> Self:
+        return self { inner: Vector::new(val) }
+    fn push(&mut self, item: T):
+        self.inner.push(item)
+    fn get(&self, index: i32) -> T:
+        return self.inner.get(index)
+    fn len(&self) -> i32:
+        return self.inner.len()
+    fn clone(&self) -> Self:
+        return self { inner: self.inner.clone() }
+
 impl<T> Vector<T>:
     fn new(val: T) -> Self:
         return self {
             raw: RawVector<T>::new(20, val.clone())
         }
+    
+    fn clone(&self) -> Self:
+        return self { raw: self.raw.clone() }
 
     fn new_with_value(val: T) -> Self:
         return self {
@@ -65,6 +83,14 @@ impl<T> RawVector<T>:
 
     fn len(&self) -> i32:
         return self.length
+
+    fn clone(&self) -> *box self:
+        var new_raw = RawVector::new(self.cap, self.buffer[0].clone())
+        var mut i = 0
+        while i < self.length:
+            new_raw.push(self.buffer[i].clone())
+            i = i + 1
+        return new_raw
 
     fn destroy(&mut self):
         mem::free(self.buffer, self.cap)

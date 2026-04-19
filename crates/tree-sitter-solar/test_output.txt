@@ -1,0 +1,159 @@
+  basic:
+    ✗ [31mFunction with block[0m
+    ✗ [31mWhile loop[0m
+    ✗ [31mObject and Impl[0m
+  full:
+    ✗ [31mComplex main.sr features[0m
+
+4 failures:
+
+[32mexpected[0m / [31mactual[0m
+
+  1. Function with block:
+
+    (source_file
+[31m      (ERROR[0m
+[32m      (function_definition[0m
+        (identifier)
+        (parameters)
+[31m        (UNEXPECTED 'v')))[0m
+[32m        (block
+          (variable_declaration
+            (identifier)
+            (number))
+          (return_statement
+            (identifier_path
+              (identifier))))))[0m
+
+
+  2. While loop:
+
+    (source_file
+[31m      (ERROR
+        (UNEXPECTED 'w')
+        (UNEXPECTED 'v')))[0m
+[32m      (while_statement
+        (boolean)
+        (block
+          (variable_declaration
+            (identifier)
+            (number))
+          (assignment_statement
+            (identifier_path
+              (identifier))
+            (binary_expression
+              (identifier_path
+                (identifier))
+              (number))))))[0m
+
+
+  3. Object and Impl:
+
+    (source_file
+[31m      (ERROR[0m
+[32m      (object_definition[0m
+        (identifier)
+[31m        (UNEXPECTED 'x')
+        (UNEXPECTED 'i')
+        (UNEXPECTED 'i')
+        (UNEXPECTED 'n')
+        (UNEXPECTED 'x')
+        (UNEXPECTED 'i')
+        (UNEXPECTED 'i')
+        (UNEXPECTED 'P')
+        (UNEXPECTED 'r')
+        (UNEXPECTED 'x')
+        (UNEXPECTED 'y')))[0m
+[32m        (field_definition
+          (identifier)
+          (type
+            (identifier_path
+              (identifier))))
+        (field_definition
+          (identifier)
+          (type
+            (identifier_path
+              (identifier)))))
+      (impl_definition
+        (type
+          (identifier_path
+            (identifier)))
+        (function_definition
+          (identifier)
+          (parameters
+            (parameter
+              (identifier)
+              (type
+                (identifier_path
+                  (identifier))))
+            (parameter
+              (identifier)
+              (type
+                (identifier_path
+                  (identifier)))))
+          (type
+            (identifier_path
+              (identifier)))
+          (block
+            (return_statement
+              (struct_literal
+                (identifier_path
+                  (identifier))
+                (struct_field
+                  (identifier)
+                  (identifier_path
+                    (identifier)))
+                (struct_field
+                  (identifier)
+                  (identifier_path
+                    (identifier)))))))))[0m
+
+
+  4. Complex main.sr features:
+
+    (source_file
+[31m      (ERROR
+        (UNEXPECTED 'r')
+        (UNEXPECTED 'm')
+        (UNEXPECTED 'p')
+        (UNEXPECTED '*')
+        (UNEXPECTED 'm')
+        (UNEXPECTED '"')
+        (UNEXPECTED ']')[0m
+[32m      (rust_dependency[0m
+        (identifier)
+[32m        (string))
+      (use_declaration
+        (identifier_path
+          (identifier)
+          (identifier)
+          (identifier)))
+      (ERROR)
+      (function_definition
+        (attribute
+          (call_expression
+            (identifier_path
+              (identifier)
+              (identifier))
+            (string)))
+        (identifier)[0m
+        (parameters)
+[31m        (UNEXPECTED 'v')
+        (UNEXPECTED 'a')
+        (UNEXPECTED '.')))[0m
+[32m        (block
+          (variable_declaration
+            (identifier)
+            (as_expression
+              (call_expression
+                (identifier_path
+                  (identifier)))
+              (type
+                (identifier_path
+                  (identifier)))))
+          (expression_statement
+            (await_expression
+              (call_expression
+                (identifier_path
+                  (identifier))))))))[0m
+

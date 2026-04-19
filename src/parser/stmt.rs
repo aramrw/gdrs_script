@@ -6,19 +6,20 @@ use crate::parser::{ParserExt, ParserExtra, StmtParserExt, double_colon_path, id
 use chumsky::input::ValueInput;
 use chumsky::prelude::*;
 
-pub fn stmt_parser<'a, I>() -> impl Parser<'a, I, Stmt, ParserExtra<'a>> + Clone
+pub fn stmt_parser<'a, I>(
+    stmt: impl Parser<'a, I, Stmt, ParserExtra<'a>> + Clone + 'a,
+    expr: impl Parser<'a, I, Expr, ParserExtra<'a>> + Clone + 'a,
+) -> impl Parser<'a, I, Stmt, ParserExtra<'a>> + Clone + 'a
 where
     I: ValueInput<'a, Token = Token, Span = Span>,
 {
     let ty = type_parser::<I>();
-    let expr = expr_parser::<I>();
 
-    recursive(|stmt| {
-        let block = just(Token::Indent)
-            .ignore_then(stmt.clone().repeated().collect())
-            .then_ignore(just(Token::Dedent))
-            .map(StmtKind::Block)
-            .into_stmt();
+    let block = just(Token::Indent)
+        .ignore_then(stmt.clone().repeated().collect())
+        .then_ignore(just(Token::Dedent))
+        .map(StmtKind::Block)
+        .into_stmt();
 
         let var_decl = just(Token::Var)
             .ignore_then(just(Token::Mut).or_not())
@@ -153,13 +154,20 @@ where
 
         let match_stmt = just(Token::Match)
             .ignore_then(expr.clone())
-            .then_ignore(just(Token::Colon).or_not())
+            .then_ignore(choice((
+                just(Token::FatArrow),
+                just(Token::Colon),
+                empty().to(Token::Colon), // Fallback
+            )))
             .then(
                 just(Token::Indent)
                     .ignore_then(
                         match_pattern
-                            .then_ignore(just(Token::FatArrow))
-                            .then(stmt.clone())
+                            .then_ignore(just(Token::Colon))
+                            .then(choice((
+                                block.clone(),
+                                stmt.clone(),
+                            )))
                             .map(|(pattern, body)| Arm { pattern, body })
                             .repeated()
                             .collect(),
@@ -197,5 +205,4 @@ where
             unsafe_stmt,
             expr_stmt,
         ))
-    })
 }

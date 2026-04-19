@@ -1,0 +1,6 @@
+rust dependency macroquad = "0.4"
+use crate::macroquad::prelude::*
+#[macroquad::main("Test")]
+async fn main():
+    var x = get_time() as f32
+    next_frame().await

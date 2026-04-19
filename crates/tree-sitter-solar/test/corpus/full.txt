@@ -1,0 +1,47 @@
+==================
+Complex main.sr features
+==================
+rust dependency macroquad = "0.4"
+use crate::macroquad::prelude::*;
+
+#[macroquad::main("Test")]
+async fn main():
+    var x = get_time() as f32
+    next_frame().await
+
+---
+
+(source_file
+  (rust_dependency
+    (identifier)
+    (string))
+  (use_declaration
+    (identifier_path
+      (identifier)
+      (identifier)
+      (identifier)))
+  (ERROR)
+  (function_definition
+    (attribute
+      (call_expression
+        (identifier_path
+          (identifier)
+          (identifier))
+        (string)))
+    (identifier)
+    (parameters)
+    (block
+      (variable_declaration
+        (identifier)
+        (as_expression
+          (call_expression
+            (identifier_path
+              (identifier)))
+          (type
+            (identifier_path
+              (identifier)))))
+      (expression_statement
+        (await_expression
+          (call_expression
+            (identifier_path
+              (identifier))))))))

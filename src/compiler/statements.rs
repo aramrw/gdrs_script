@@ -1,7 +1,10 @@
 use proc_macro2::TokenStream;
 use quote::quote;
 
-use crate::{ast::{ExprKind, Stmt, StmtKind, Type}, compiler::{compile_expr, compile_pattern, types::compile_type_ext}};
+use crate::{
+    ast::{ExprKind, Stmt, StmtKind, Type},
+    compiler::{compile_expr, compile_pattern, types::compile_type_ext},
+};
 
 pub fn compile_stmt(
     stmt: &Stmt,
@@ -21,7 +24,7 @@ pub fn compile_stmt(
 
             let val_raw = compile_expr(value, target_obj, false);
 
-            // If the expression returns a reference in Rust (Alloc, Downgrade), 
+            // If the expression returns a reference in Rust (Alloc, Downgrade),
             // but for a variable declaration we want the owned value.
             let returns_ref = match &value.kind {
                 ExprKind::Alloc(_, _) | ExprKind::Downgrade(_) => true,
@@ -39,8 +42,12 @@ pub fn compile_stmt(
                 } else {
                     compile_type_ext(pt, target_obj)
                 };
-                
-                let mut val_src = if returns_ref { quote! { (#val_raw).clone() } } else { val_raw.clone() };
+
+                let mut val_src = if returns_ref {
+                    quote! { (#val_raw).clone() }
+                } else {
+                    val_raw.clone()
+                };
 
                 let val_managed = match pt {
                     Type::Managed(_) if !matches!(value.ty, Some(Type::Managed(_))) => {
@@ -56,7 +63,11 @@ pub fn compile_stmt(
                 };
                 (quote!(: #ct), val_managed)
             } else {
-                let final_val = if returns_ref { quote! { (#val_raw).clone() } } else { val_raw };
+                let final_val = if returns_ref {
+                    quote! { (#val_raw).clone() }
+                } else {
+                    val_raw
+                };
                 (quote!(), final_val)
             };
 

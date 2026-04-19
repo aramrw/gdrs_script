@@ -1,0 +1,27 @@
+rust dependency macroquad = "0.4"
+
+use crate::macroquad::prelude::*;
+use crate::std::vec::Vec;
+
+fn draw_star_burst():
+    var center = vec2(screen_width() / 2.0, screen_height() / 2.0)
+    var count = 20.0
+    var time = get_time() as f32
+    var mut i = 0.0
+
+    while i < count:
+        var angle = (i / count) * 6.28 + time
+        var x = center.x + angle.cos() * 150.0
+        var y = center.y + angle.sin() * 150.0
+
+        var color = Color::from_vec(Vec4::from_array([i / count, 0.8, 0.5, 1.0]))
+        draw_line(center.x, center.y, x, y, 4.0, color)
+        i = i + 1.0
+
+#[macroquad::main("InterativeTriangle")]
+async fn main():
+    loop:
+        clear_background(BLACK)
+        draw_star_burst()
+        //draw_circle(250.0, 250.0, 30.0, RED)
+        next_frame().await

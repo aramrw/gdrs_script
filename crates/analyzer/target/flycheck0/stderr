@@ -1,0 +1,104 @@
+   0.057727000s  INFO prepare_target{force=false package_id=analyzer v0.1.0 (/Users/aramsamifanni/Programming/lang/crates/analyzer) target="analyzer"}: cargo::core::compiler::fingerprint: fingerprint error for analyzer v0.1.0 (/Users/aramsamifanni/Programming/lang/crates/analyzer)/Check { test: false }/TargetInner { name: "analyzer", doc: true, ..: with_path("/Users/aramsamifanni/Programming/lang/crates/analyzer/src/main.rs", Edition2021) }
+   0.057750500s  INFO prepare_target{force=false package_id=analyzer v0.1.0 (/Users/aramsamifanni/Programming/lang/crates/analyzer) target="analyzer"}: cargo::core::compiler::fingerprint:     err: failed to read `/Users/aramsamifanni/Programming/lang/crates/analyzer/target/debug/.fingerprint/analyzer-122fc58a920b0af8/bin-analyzer`
+
+Caused by:
+    No such file or directory (os error 2)
+
+Stack backtrace:
+   0: <std::backtrace::Backtrace>::create
+   1: cargo_util::paths::read_bytes
+   2: cargo_util::paths::read
+   3: cargo::core::compiler::fingerprint::_compare_old_fingerprint
+   4: cargo::core::compiler::fingerprint::prepare_target
+   5: cargo::core::compiler::compile
+   6: <cargo::core::compiler::build_runner::BuildRunner>::compile
+   7: cargo::ops::cargo_compile::compile_ws
+   8: cargo::ops::cargo_compile::compile_with_exec
+   9: cargo::ops::cargo_compile::compile
+  10: cargo::commands::check::exec
+  11: <cargo::cli::Exec>::exec
+  12: cargo::main
+  13: std::sys::backtrace::__rust_begin_short_backtrace::<fn(), ()>
+  14: std::rt::lang_start::<()>::{closure#0}
+  15: std::rt::lang_start_internal
+  16: _main
+   0.069141708s  INFO prepare_target{force=false package_id=tree-sitter-solar v0.1.0 (/Users/aramsamifanni/Programming/lang/crates/tree-sitter-solar) target="tree_sitter_solar"}: cargo::core::compiler::fingerprint: fingerprint error for tree-sitter-solar v0.1.0 (/Users/aramsamifanni/Programming/lang/crates/tree-sitter-solar)/Check { test: false }/TargetInner { name_inferred: true, ..: lib_target("tree_sitter_solar", ["lib"], "/Users/aramsamifanni/Programming/lang/crates/tree-sitter-solar/bindings/rust/lib.rs", Edition2021) }
+   0.069154583s  INFO prepare_target{force=false package_id=tree-sitter-solar v0.1.0 (/Users/aramsamifanni/Programming/lang/crates/tree-sitter-solar) target="tree_sitter_solar"}: cargo::core::compiler::fingerprint:     err: failed to read `/Users/aramsamifanni/Programming/lang/crates/analyzer/target/debug/.fingerprint/tree-sitter-solar-51961d90759b82b0/lib-tree_sitter_solar`
+
+Caused by:
+    No such file or directory (os error 2)
+
+Stack backtrace:
+   0: <std::backtrace::Backtrace>::create
+   1: cargo_util::paths::read_bytes
+   2: cargo_util::paths::read
+   3: cargo::core::compiler::fingerprint::_compare_old_fingerprint
+   4: cargo::core::compiler::fingerprint::prepare_target
+   5: cargo::core::compiler::compile
+   6: cargo::core::compiler::compile
+   7: <cargo::core::compiler::build_runner::BuildRunner>::compile
+   8: cargo::ops::cargo_compile::compile_ws
+   9: cargo::ops::cargo_compile::compile_with_exec
+  10: cargo::ops::cargo_compile::compile
+  11: cargo::commands::check::exec
+  12: <cargo::cli::Exec>::exec
+  13: cargo::main
+  14: std::sys::backtrace::__rust_begin_short_backtrace::<fn(), ()>
+  15: std::rt::lang_start::<()>::{closure#0}
+  16: std::rt::lang_start_internal
+  17: _main
+   0.069642375s  INFO prepare_target{force=false package_id=analyzer v0.1.0 (/Users/aramsamifanni/Programming/lang/crates/analyzer) target="analyzer"}: cargo::core::compiler::fingerprint: fingerprint error for analyzer v0.1.0 (/Users/aramsamifanni/Programming/lang/crates/analyzer)/Check { test: true }/TargetInner { name: "analyzer", doc: true, ..: with_path("/Users/aramsamifanni/Programming/lang/crates/analyzer/src/main.rs", Edition2021) }
+   0.069648833s  INFO prepare_target{force=false package_id=analyzer v0.1.0 (/Users/aramsamifanni/Programming/lang/crates/analyzer) target="analyzer"}: cargo::core::compiler::fingerprint:     err: failed to read `/Users/aramsamifanni/Programming/lang/crates/analyzer/target/debug/.fingerprint/analyzer-e8477e42c4369418/test-bin-analyzer`
+
+Caused by:
+    No such file or directory (os error 2)
+
+Stack backtrace:
+   0: <std::backtrace::Backtrace>::create
+   1: cargo_util::paths::read_bytes
+   2: cargo_util::paths::read
+   3: cargo::core::compiler::fingerprint::_compare_old_fingerprint
+   4: cargo::core::compiler::fingerprint::prepare_target
+   5: cargo::core::compiler::compile
+   6: <cargo::core::compiler::build_runner::BuildRunner>::compile
+   7: cargo::ops::cargo_compile::compile_ws
+   8: cargo::ops::cargo_compile::compile_with_exec
+   9: cargo::ops::cargo_compile::compile
+  10: cargo::commands::check::exec
+  11: <cargo::cli::Exec>::exec
+  12: cargo::main
+  13: std::sys::backtrace::__rust_begin_short_backtrace::<fn(), ()>
+  14: std::rt::lang_start::<()>::{closure#0}
+  15: std::rt::lang_start_internal
+  16: _main
+warning: tree-sitter-solar@0.1.0: src/scanner.c:7:55: warning: unused parameter 'payload' [-Wunused-parameter]
+warning: tree-sitter-solar@0.1.0:     7 | void tree_sitter_solar_external_scanner_destroy(void *payload) {}
+warning: tree-sitter-solar@0.1.0:       |                                                       ^
+warning: tree-sitter-solar@0.1.0: src/scanner.c:8:61: warning: unused parameter 'payload' [-Wunused-parameter]
+warning: tree-sitter-solar@0.1.0:     8 | unsigned tree_sitter_solar_external_scanner_serialize(void *payload, char *buffer) { return 0; }
+warning: tree-sitter-solar@0.1.0:       |                                                             ^
+warning: tree-sitter-solar@0.1.0: src/scanner.c:8:76: warning: unused parameter 'buffer' [-Wunused-parameter]
+warning: tree-sitter-solar@0.1.0:     8 | unsigned tree_sitter_solar_external_scanner_serialize(void *payload, char *buffer) { return 0; }
+warning: tree-sitter-solar@0.1.0:       |                                                                            ^
+warning: tree-sitter-solar@0.1.0: src/scanner.c:9:59: warning: unused parameter 'payload' [-Wunused-parameter]
+warning: tree-sitter-solar@0.1.0:     9 | void tree_sitter_solar_external_scanner_deserialize(void *payload, const char *buffer, unsigned length) {}
+warning: tree-sitter-solar@0.1.0:       |                                                           ^
+warning: tree-sitter-solar@0.1.0: src/scanner.c:9:80: warning: unused parameter 'buffer' [-Wunused-parameter]
+warning: tree-sitter-solar@0.1.0:     9 | void tree_sitter_solar_external_scanner_deserialize(void *payload, const char *buffer, unsigned length) {}
+warning: tree-sitter-solar@0.1.0:       |                                                                                ^
+warning: tree-sitter-solar@0.1.0: src/scanner.c:9:97: warning: unused parameter 'length' [-Wunused-parameter]
+warning: tree-sitter-solar@0.1.0:     9 | void tree_sitter_solar_external_scanner_deserialize(void *payload, const char *buffer, unsigned length) {}
+warning: tree-sitter-solar@0.1.0:       |                                                                                                 ^
+warning: tree-sitter-solar@0.1.0: src/scanner.c:11:52: warning: unused parameter 'payload' [-Wunused-parameter]
+warning: tree-sitter-solar@0.1.0:    11 | bool tree_sitter_solar_external_scanner_scan(void *payload, TSLexer *lexer, const bool *valid_symbols) {
+warning: tree-sitter-solar@0.1.0:       |                                                    ^
+warning: tree-sitter-solar@0.1.0: src/scanner.c:11:70: warning: unused parameter 'lexer' [-Wunused-parameter]
+warning: tree-sitter-solar@0.1.0:    11 | bool tree_sitter_solar_external_scanner_scan(void *payload, TSLexer *lexer, const bool *valid_symbols) {
+warning: tree-sitter-solar@0.1.0:       |                                                                      ^
+warning: tree-sitter-solar@0.1.0: src/scanner.c:11:89: warning: unused parameter 'valid_symbols' [-Wunused-parameter]
+warning: tree-sitter-solar@0.1.0:    11 | bool tree_sitter_solar_external_scanner_scan(void *payload, TSLexer *lexer, const bool *valid_symbols) {
+warning: tree-sitter-solar@0.1.0:       |                                                                                         ^
+warning: tree-sitter-solar@0.1.0: 9 warnings generated.
+    Checking tree-sitter-solar v0.1.0 (/Users/aramsamifanni/Programming/lang/crates/tree-sitter-solar)
+    Checking analyzer v0.1.0 (/Users/aramsamifanni/Programming/lang/crates/analyzer)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.34s

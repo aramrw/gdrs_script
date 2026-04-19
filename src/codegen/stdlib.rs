@@ -364,6 +364,13 @@ pub(crate) fn generate_solar_std(has_macroquad: bool) -> TokenStream {
     impl crate::SolarAsVal<bool> for bool { fn as_val(&self) -> bool { *self } }
     impl crate::SolarAsVal<bool> for &bool { fn as_val(&self) -> bool { **self } }
 
+    impl<T: Clone + Copy, const N: usize> crate::SolarAsVal<[T; N]> for [T; N] {
+        fn as_val(&self) -> [T; N] { *self }
+    }
+    impl<T: Clone + Copy, const N: usize> crate::SolarAsVal<[T; N]> for &[T; N] {
+        fn as_val(&self) -> [T; N] { **self }
+    }
+
     impl crate::SolarAsVal<()> for () { fn as_val(&self) -> () { () } }
     impl crate::SolarAsVal<()> for &() { fn as_val(&self) -> () { **self } }
 
@@ -376,6 +383,8 @@ pub(crate) fn generate_solar_std(has_macroquad: bool) -> TokenStream {
             impl crate::SolarAsVal<::macroquad::math::Vec2> for &::macroquad::math::Vec2 { fn as_val(&self) -> ::macroquad::math::Vec2 { **self } }
             impl crate::SolarAsVal<::macroquad::color::Color> for ::macroquad::color::Color { fn as_val(&self) -> ::macroquad::color::Color { *self } }
             impl crate::SolarAsVal<::macroquad::color::Color> for &::macroquad::color::Color { fn as_val(&self) -> ::macroquad::color::Color { **self } }
+            impl crate::SolarAsVal<::macroquad::math::Vec4> for ::macroquad::math::Vec4 { fn as_val(&self) -> ::macroquad::math::Vec4 { *self } }
+            impl crate::SolarAsVal<::macroquad::math::Vec4> for &::macroquad::math::Vec4 { fn as_val(&self) -> ::macroquad::math::Vec4 { **self } }
             impl crate::SolarAsVal<::macroquad::text::TextDimensions> for ::macroquad::text::TextDimensions { fn as_val(&self) -> ::macroquad::text::TextDimensions { *self } }
             impl crate::SolarAsVal<::macroquad::text::TextDimensions> for &::macroquad::text::TextDimensions { fn as_val(&self) -> ::macroquad::text::TextDimensions { **self } }
         });

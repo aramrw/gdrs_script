@@ -4,10 +4,12 @@ mod stmt;
 
 use crate::ast::*;
 use crate::lexer::{Span, Token};
+use crate::parser::expr::expr_parser;
 use crate::parser::stmt::stmt_parser;
 use crate::parser::types::type_parser;
 use chumsky::input::ValueInput;
 use chumsky::prelude::*;
+
 
 pub type ParserExtra<'a> = extra::Err<Rich<'a, Token, Span>>;
 
@@ -41,37 +43,39 @@ where
 pub trait ExprParserExt<'a, I>: Parser<'a, I, ExprKind, ParserExtra<'a>> + Clone
 where
     I: ValueInput<'a, Token = Token, Span = Span>,
+    Self: 'a,
 {
-    fn into_expr(self) -> impl Parser<'a, I, Expr, ParserExtra<'a>> + Clone {
+    fn into_expr(self) -> Boxed<'a, 'a, I, Expr, ParserExtra<'a>> {
         self.map_with(|kind, e| Expr {
             kind,
             span: e.span(),
             ty: None,
-        })
+        }).boxed()
     }
 }
 impl<'a, I, T> ExprParserExt<'a, I> for T
 where
     I: ValueInput<'a, Token = Token, Span = Span>,
-    T: Parser<'a, I, ExprKind, ParserExtra<'a>> + Clone,
+    T: Parser<'a, I, ExprKind, ParserExtra<'a>> + Clone + 'a,
 {
 }
 
 pub trait StmtParserExt<'a, I>: Parser<'a, I, StmtKind, ParserExtra<'a>> + Clone
 where
     I: ValueInput<'a, Token = Token, Span = Span>,
+    Self: 'a,
 {
-    fn into_stmt(self) -> impl Parser<'a, I, Stmt, ParserExtra<'a>> + Clone {
+    fn into_stmt(self) -> Boxed<'a, 'a, I, Stmt, ParserExtra<'a>> {
         self.map_with(|kind, e| Stmt {
             kind,
             span: e.span(),
-        })
+        }).boxed()
     }
 }
 impl<'a, I, T> StmtParserExt<'a, I> for T
 where
     I: ValueInput<'a, Token = Token, Span = Span>,
-    T: Parser<'a, I, StmtKind, ParserExtra<'a>> + Clone,
+    T: Parser<'a, I, StmtKind, ParserExtra<'a>> + Clone + 'a,
 {
 }
 
@@ -154,12 +158,14 @@ where
 
 
 
-fn block_parser<'a, I>() -> impl Parser<'a, I, Stmt, ParserExtra<'a>> + Clone
+fn block_parser<'a, I>(
+    stmt: impl Parser<'a, I, Stmt, ParserExtra<'a>> + Clone + 'a,
+) -> impl Parser<'a, I, Stmt, ParserExtra<'a>> + Clone + 'a
 where
     I: ValueInput<'a, Token = Token, Span = Span>,
 {
     just(Token::Indent)
-        .ignore_then(stmt_parser().repeated().collect())
+        .ignore_then(stmt.repeated().collect())
         .then_ignore(just(Token::Dedent))
         .map(StmtKind::Block)
         .into_stmt()
@@ -253,14 +259,16 @@ where
         )
 }
 
-fn func_parser<'a, I>() -> impl Parser<'a, I, Function, ParserExtra<'a>> + Clone
+fn func_parser<'a, I>(
+    stmt: impl Parser<'a, I, Stmt, ParserExtra<'a>> + Clone + 'a,
+) -> impl Parser<'a, I, Function, ParserExtra<'a>> + Clone + 'a
 where
     I: ValueInput<'a, Token = Token, Span = Span>,
 {
     attribute_parser()
         .then(func_sig_parser())
         .then_ignore(just(Token::Colon).or_not())
-        .then(block_parser())
+        .then(block_parser(stmt))
         .map(|((attributes, sig), body)| Function {
             name: sig.name,
             generics: sig.generics,
@@ -400,13 +408,15 @@ where
     just(Token::Extern).ignore_then(enum_parser())
 }
 
-fn trait_method_parser<'a, I>() -> impl Parser<'a, I, Function, ParserExtra<'a>> + Clone
+fn trait_method_parser<'a, I>(
+    stmt: impl Parser<'a, I, Stmt, ParserExtra<'a>> + Clone + 'a,
+) -> impl Parser<'a, I, Function, ParserExtra<'a>> + Clone + 'a
 where
     I: ValueInput<'a, Token = Token, Span = Span>,
 {
     attribute_parser()
         .then(func_sig_parser())
-        .then(just(Token::Colon).ignore_then(block_parser()).or_not())
+        .then(just(Token::Colon).ignore_then(block_parser(stmt)).or_not())
         .map_with(|((attributes, sig), body), e| Function {
             name: sig.name,
             generics: sig.generics,
@@ -422,7 +432,9 @@ where
         })
 }
 
-fn trait_parser<'a, I>() -> impl Parser<'a, I, TraitDecl, ParserExtra<'a>> + Clone
+fn trait_parser<'a, I>(
+    stmt: impl Parser<'a, I, Stmt, ParserExtra<'a>> + Clone + 'a,
+) -> impl Parser<'a, I, TraitDecl, ParserExtra<'a>> + Clone + 'a
 where
     I: ValueInput<'a, Token = Token, Span = Span>,
 {
@@ -444,7 +456,7 @@ where
         .then(
             just(Token::Indent)
                 .ignore_then(
-                    trait_method_parser()
+                    trait_method_parser(stmt)
                         .then_ignore(just(Token::Semicolon).or_not())
                         .repeated()
                         .collect(),
@@ -462,18 +474,22 @@ where
         )
 }
 
-fn extern_trait_parser<'a, I>() -> impl Parser<'a, I, TraitDecl, ParserExtra<'a>> + Clone
+fn extern_trait_parser<'a, I>(
+    stmt: impl Parser<'a, I, Stmt, ParserExtra<'a>> + Clone + 'a,
+) -> impl Parser<'a, I, TraitDecl, ParserExtra<'a>> + Clone + 'a
 where
     I: ValueInput<'a, Token = Token, Span = Span>,
 {
-    just(Token::Extern).ignore_then(trait_parser())
+    just(Token::Extern).ignore_then(trait_parser(stmt))
 }
 
-fn impl_parser<'a, I>() -> impl Parser<'a, I, ImplDecl, ParserExtra<'a>> + Clone
+fn impl_parser<'a, I>(
+    stmt: impl Parser<'a, I, Stmt, ParserExtra<'a>> + Clone + 'a,
+) -> impl Parser<'a, I, ImplDecl, ParserExtra<'a>> + Clone + 'a
 where
     I: ValueInput<'a, Token = Token, Span = Span>,
 {
-    let method = func_parser()
+    let method = func_parser(stmt.clone())
         .or(extern_func_parser())
         .then_ignore(just(Token::Semicolon).or_not());
 
@@ -522,11 +538,13 @@ where
         )
 }
 
-fn extern_impl_parser<'a, I>() -> impl Parser<'a, I, ImplDecl, ParserExtra<'a>> + Clone
+fn extern_impl_parser<'a, I>(
+    stmt: impl Parser<'a, I, Stmt, ParserExtra<'a>> + Clone + 'a,
+) -> impl Parser<'a, I, ImplDecl, ParserExtra<'a>> + Clone + 'a
 where
     I: ValueInput<'a, Token = Token, Span = Span>,
 {
-    let method = func_parser()
+    let method = func_parser(stmt.clone())
         .or(extern_func_parser())
         .then_ignore(just(Token::Semicolon).or_not());
 
@@ -658,42 +676,50 @@ pub fn parser<'a, I>() -> impl Parser<'a, I, Program, ParserExtra<'a>>
 where
     I: ValueInput<'a, Token = Token, Span = Span>,
 {
-    let decl = choice((
-        rust_dependency_parser(),
-        rust_block_parser(),
-        func_parser().map(Decl::Function),
-        obj_parser()
-            .map(Decl::Object)
-            .then_ignore(just(Token::Semicolon).or_not()),
-        enum_parser()
-            .map(Decl::Enum)
-            .then_ignore(just(Token::Semicolon).or_not()),
-        trait_parser()
-            .map(Decl::Trait)
-            .then_ignore(just(Token::Semicolon).or_not()),
-        impl_parser()
-            .map(Decl::Impl)
-            .then_ignore(just(Token::Semicolon).or_not()),
-        extern_func_parser()
-            .map(Decl::ExternFunction)
-            .then_ignore(just(Token::Semicolon).or_not()),
-        extern_obj_parser()
-            .map(Decl::ExternObject)
-            .then_ignore(just(Token::Semicolon).or_not()),
-        extern_enum_parser()
-            .map(Decl::ExternEnum)
-            .then_ignore(just(Token::Semicolon).or_not()),
-        extern_trait_parser()
-            .map(Decl::ExternTrait)
-            .then_ignore(just(Token::Semicolon).or_not()),
-        extern_impl_parser()
-            .map(Decl::ExternImpl)
-            .then_ignore(just(Token::Semicolon).or_not()),
-        use_parser(),
-    ));
+    recursive(|program| {
+        let stmt = recursive(|stmt| {
+            let expr = recursive(|expr| expr_parser(stmt.clone(), expr.clone()));
+            stmt_parser(stmt, expr)
+        });
+        let expr = recursive(|expr| expr_parser(stmt.clone(), expr.clone()));
 
-    decl.repeated()
-        .collect()
-        .map(|declarations| Program { declarations })
-        .then_ignore(end())
+        let decl = choice((
+            rust_dependency_parser(),
+            rust_block_parser(),
+            func_parser(stmt.clone()).map(Decl::Function),
+            obj_parser()
+                .map(Decl::Object)
+                .then_ignore(just(Token::Semicolon).or_not()),
+            enum_parser()
+                .map(Decl::Enum)
+                .then_ignore(just(Token::Semicolon).or_not()),
+            trait_parser(stmt.clone())
+                .map(Decl::Trait)
+                .then_ignore(just(Token::Semicolon).or_not()),
+            impl_parser(stmt.clone())
+                .map(Decl::Impl)
+                .then_ignore(just(Token::Semicolon).or_not()),
+            extern_func_parser()
+                .map(Decl::ExternFunction)
+                .then_ignore(just(Token::Semicolon).or_not()),
+            extern_obj_parser()
+                .map(Decl::ExternObject)
+                .then_ignore(just(Token::Semicolon).or_not()),
+            extern_enum_parser()
+                .map(Decl::ExternEnum)
+                .then_ignore(just(Token::Semicolon).or_not()),
+            extern_trait_parser(stmt.clone())
+                .map(Decl::ExternTrait)
+                .then_ignore(just(Token::Semicolon).or_not()),
+            extern_impl_parser(stmt.clone())
+                .map(Decl::ExternImpl)
+                .then_ignore(just(Token::Semicolon).or_not()),
+            use_parser(),
+        ));
+
+        decl.repeated()
+            .collect()
+            .map(|declarations| Program { declarations })
+            .then_ignore(end())
+    })
 }

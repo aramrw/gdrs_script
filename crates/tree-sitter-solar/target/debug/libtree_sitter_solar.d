@@ -1,0 +1,1 @@
+/Users/aramsamifanni/Programming/lang/crates/tree-sitter-solar/target/debug/libtree_sitter_solar.rlib: /Users/aramsamifanni/Programming/lang/crates/tree-sitter-solar/bindings/rust/lib.rs /Users/aramsamifanni/Programming/lang/crates/tree-sitter-solar/build.rs /Users/aramsamifanni/Programming/lang/crates/tree-sitter-solar/src/node-types.json

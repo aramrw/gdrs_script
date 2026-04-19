@@ -39,6 +39,7 @@ pub fn compile_expr(expr: &Expr, target_obj: Option<&String>, is_mut: bool) -> T
                 }
             }
 
+            // this seems a little ridiculous
             match op {
                 BinaryOp::Add => quote! { ((&#l).as_val() + (&#r).as_val()) },
                 BinaryOp::Subtract => quote! { ((&#l).as_val() - (&#r).as_val()) },
@@ -49,11 +50,28 @@ pub fn compile_expr(expr: &Expr, target_obj: Option<&String>, is_mut: bool) -> T
                 BinaryOp::GreaterThanOrEqual => quote! { ((&#l).as_val() >= (&#r).as_val()) },
                 BinaryOp::LessThanOrEqual => quote! { ((&#l).as_val() <= (&#r).as_val()) },
                 BinaryOp::Equal => quote! { ((&#l).as_val() == (&#r).as_val()) },
+                BinaryOp::Modulo => quote! { ((&#l).as_val() % (&#r).as_val()) },
             }
         }
         ExprKind::Tuple(items) => {
             let items = items.iter().map(|i| compile_expr(i, target_obj, false));
             quote! { (#( #items ),*) }
+        }
+        ExprKind::Array(items) => {
+            let items = items.iter().map(|i| {
+                let e = compile_expr(i, target_obj, false);
+                quote!((&#e).as_val())
+            });
+            quote! { [#(#items),*] }
+        }
+        ExprKind::Block(stmts) => {
+            use crate::compiler::statements::compile_stmt;
+            let len = stmts.len();
+            let stmts_compiled = stmts
+                .iter()
+                .enumerate()
+                .map(|(idx, s)| compile_stmt(s, idx == len - 1, target_obj, expr.ty.as_ref()));
+            quote! { { #( #stmts_compiled )* } }
         }
         ExprKind::Call(path, args, resolved_name, arg_kinds, param_types) => {
             let is_phantom = matches!(expr.ty, Some(Type::Any));
@@ -80,11 +98,11 @@ pub fn compile_expr(expr: &Expr, target_obj: Option<&String>, is_mut: bool) -> T
                 // The element's type in Solar is T, so we want *mut T in Rust
                 let ty = compile_type_ext(args[0].ty.as_ref().unwrap_or(&Type::I32), target_obj);
                 return quote! { unsafe {
-                    let mut v: Vec<#ty> = (0..crate::SolarAsSize::as_size(&#size)).map(|_| (&#element).as_val()).collect();
+                    let mut v: Vec<#ty> = (0..crate::SolarAsSize::as_size(&#size)).map(|_| (#element)).collect();
                     let p = v.as_mut_ptr();
                     std::mem::forget(v);
                     p
-                } };
+                    } };
             }
             let id = if let Some(resolved) = resolved_name {
                 let mut base = compile_id_expr(resolved);
@@ -103,23 +121,27 @@ pub fn compile_expr(expr: &Expr, target_obj: Option<&String>, is_mut: bool) -> T
             } else {
                 compile_path(path, target_obj)
             };
-            let args = args.iter().enumerate().map(|(i, a)| {
-                let kind = arg_kinds
-                    .as_ref()
-                    .and_then(|ks| ks.get(i))
-                    .cloned()
-                    .unwrap_or(ArgKind::Value);
-                if is_phantom && matches!(kind, ArgKind::Value) {
-                    let e = compile_expr(a, target_obj, false);
-                    return quote!((&#e).as_val());
-                }
-                let expected = param_types.as_ref().and_then(|pts| pts.get(i));
-                match kind {
-                    ArgKind::Value => wrap_expr_for_ref(a, expected, target_obj, false),
-                    ArgKind::Ref => wrap_expr_for_ref(a, expected, target_obj, false),
-                    ArgKind::MutRef => wrap_expr_for_ref(a, expected, target_obj, true),
-                }
-            }).collect::<Vec<_>>();
+            let args = args
+                .iter()
+                .enumerate()
+                .map(|(i, a)| {
+                    let kind = arg_kinds
+                        .as_ref()
+                        .and_then(|ks| ks.get(i))
+                        .cloned()
+                        .unwrap_or(ArgKind::Value);
+                    if is_phantom && matches!(kind, ArgKind::Value) {
+                        let e = compile_expr(a, target_obj, false);
+                        return quote!((&#e).as_val());
+                    }
+                    let expected = param_types.as_ref().and_then(|pts| pts.get(i));
+                    match kind {
+                        ArgKind::Value => wrap_expr_for_ref(a, expected, target_obj, false),
+                        ArgKind::Ref => wrap_expr_for_ref(a, expected, target_obj, false),
+                        ArgKind::MutRef => wrap_expr_for_ref(a, expected, target_obj, true),
+                    }
+                })
+                .collect::<Vec<_>>();
             quote! { #id(#( #args ),*) }
         }
         ExprKind::MethodCall(lhs, name, args, resolved_obj_name, arg_kinds, param_types) => {
@@ -134,10 +156,13 @@ pub fn compile_expr(expr: &Expr, target_obj: Option<&String>, is_mut: bool) -> T
             if name == "add" || name == "offset" || name == "sub" {
                 if let Some(ty) = &lhs.ty {
                     if matches!(ty, Type::RawPtr(_, _) | Type::BoxPtr(_)) {
-                        let args = args.iter().map(|a| {
-                            let e = compile_expr(a, target_obj, false);
-                            quote!(crate::SolarAsSize::as_size(&#e))
-                        }).collect::<Vec<_>>();
+                        let args = args
+                            .iter()
+                            .map(|a| {
+                                let e = compile_expr(a, target_obj, false);
+                                quote!(crate::SolarAsSize::as_size(&#e))
+                            })
+                            .collect::<Vec<_>>();
                         let name_tokens = if let Ok(idx) = name.parse::<usize>() {
                             let lit = proc_macro2::Literal::usize_unsuffixed(idx);
                             quote!(#lit)
@@ -168,23 +193,27 @@ pub fn compile_expr(expr: &Expr, target_obj: Option<&String>, is_mut: bool) -> T
                 }
             }
 
-            let args = args.iter().enumerate().map(|(i, a)| {
-                let kind = arg_kinds
-                    .as_ref()
-                    .and_then(|ks| ks.get(i))
-                    .cloned()
-                    .unwrap_or(ArgKind::Value);
-                if is_phantom && matches!(kind, ArgKind::Value) {
-                    let e = compile_expr(a, target_obj, false);
-                    return quote!((&#e).as_val());
-                }
-                let expected = param_types.as_ref().and_then(|pts| pts.get(i));
-                match kind {
-                    ArgKind::Value => wrap_expr_for_ref(a, expected, target_obj, false),
-                    ArgKind::Ref => wrap_expr_for_ref(a, expected, target_obj, false),
-                    ArgKind::MutRef => wrap_expr_for_ref(a, expected, target_obj, true),
-                }
-            }).collect::<Vec<_>>();
+            let args = args
+                .iter()
+                .enumerate()
+                .map(|(i, a)| {
+                    let kind = arg_kinds
+                        .as_ref()
+                        .and_then(|ks| ks.get(i))
+                        .cloned()
+                        .unwrap_or(ArgKind::Value);
+                    if is_phantom && matches!(kind, ArgKind::Value) {
+                        let e = compile_expr(a, target_obj, false);
+                        return quote!((&#e).as_val());
+                    }
+                    let expected = param_types.as_ref().and_then(|pts| pts.get(i));
+                    match kind {
+                        ArgKind::Value => wrap_expr_for_ref(a, expected, target_obj, false),
+                        ArgKind::Ref => wrap_expr_for_ref(a, expected, target_obj, false),
+                        ArgKind::MutRef => wrap_expr_for_ref(a, expected, target_obj, true),
+                    }
+                })
+                .collect::<Vec<_>>();
 
             let mut id_tokens = if let Ok(idx) = name_to_use.parse::<usize>() {
                 let lit = proc_macro2::Literal::usize_unsuffixed(idx);
@@ -283,6 +312,11 @@ pub fn compile_expr(expr: &Expr, target_obj: Option<&String>, is_mut: bool) -> T
                 // We'll use as_val() to handle this.
                 match &fval.ty {
                     Some(Type::Ref(_, _)) => quote! { #id: #v },
+                    Some(Type::RawPtr(_, _)) => quote! { #id: #v },
+                    Some(Type::Managed(_)) => quote! { #id: #v },
+                    Some(Type::ThreadSafe(_)) => quote! { #id: #v },
+                    Some(Type::BoxPtr(_)) => quote! { #id: #v },
+                    Some(Type::Array(ty, size)) => quote! { #id: unsafe { std::slice::from_raw_parts(#v, #size as usize).try_into().unwrap() } },
                     _ => quote! { #id: (&#v).as_val() },
                 }
             });
@@ -415,14 +449,14 @@ pub fn compile_expr(expr: &Expr, target_obj: Option<&String>, is_mut: bool) -> T
         ExprKind::Alloc(inner, kind) => {
             let e = compile_expr(inner, target_obj, false);
             match kind {
-                crate::ast::AllocKind::Box => quote!(Box::new((&#e).as_val())),
+                crate::ast::AllocKind::Box => quote!(Box::new((#e).clone())),
                 crate::ast::AllocKind::Rc => {
-                    quote!(::std::rc::Rc::new(::std::cell::RefCell::new((&#e).as_val())))
+                    quote!(::std::rc::Rc::new(::std::cell::RefCell::new((#e).clone())))
                 }
                 crate::ast::AllocKind::Arc => {
-                    quote!(::std::sync::Arc::new(::parking_lot::RwLock::new((&#e).as_val())))
+                    quote!(::std::sync::Arc::new(::parking_lot::RwLock::new((#e).clone())))
                 }
-                crate::ast::AllocKind::RawMut | crate::ast::AllocKind::RawConst => quote!(#e),
+                crate::ast::AllocKind::RawMut | crate::ast::AllocKind::RawConst => quote!((#e)),
             }
         }
         ExprKind::Downgrade(inner) => {
