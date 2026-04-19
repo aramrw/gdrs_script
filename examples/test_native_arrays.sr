@@ -1,4 +1,4 @@
-use crate::std::vec::Vec;
+use std::vec::Vector
 
 fn main():
     var mut arr = [1, 2, 3]
@@ -6,8 +6,6 @@ fn main():
     println!("Array length: {}", arr.len())
     arr[0] = 10
     println!("Modified array: {}", arr[0])
-
-    println!(typeof!(arr))
     
     var s = 5
     var mut dyn_arr = [0; s]

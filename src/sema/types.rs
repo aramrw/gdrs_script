@@ -160,6 +160,30 @@ impl TypeInfo {
             ),
         );
 
+        type_info.functions.insert(
+            "Array::len".to_string(),
+            (vec![], Some(Type::I32)),
+        );
+        type_info.functions.insert(
+            "std::vec::Vector<>::push".to_string(),
+            (vec![(Type::Generic("T".into()), ArgKind::Value)], None),
+        );
+        type_info.functions.insert(
+            "std::vec::Vector<>::pop".to_string(),
+            (vec![], Some(Type::Custom("std::option::Option<>".into(), vec![Type::Generic("T".into())]))),
+        );
+        type_info.functions.insert(
+            "std::vec::Vector<>::get".to_string(),
+            (vec![(Type::Ref(Box::new(Type::I32), false), ArgKind::Ref)], Some(Type::Generic("T".into()))),
+        );
+        type_info.functions.insert(
+            "std::vec::Vector<>::len".to_string(),
+            (vec![], Some(Type::I32)),
+        );
+        type_info.functions.insert(
+            "std::vec::Vector<>::new".to_string(),
+            (vec![(Type::Generic("T".into()), ArgKind::Value)], Some(Type::Custom("std::vec::Vector<>".into(), vec![Type::Generic("T".into())]))),
+        );
         type_info
     }
 
@@ -513,12 +537,16 @@ impl TypeInfo {
         if self.has_wildcard_phantom {
             return true;
         }
-        if self.phantom_types.contains(name) {
+        
+        // Resolve alias if it exists
+        let actual_name = self.aliases.get(name).map(|s| s.as_str()).unwrap_or(name);
+
+        if self.phantom_types.contains(actual_name) {
             return true;
         }
         // Check if the name starts with any of the known phantom types followed by ::
         for phantom_prefix in &self.phantom_types {
-            if name.starts_with(&format!("{}::", phantom_prefix)) {
+            if actual_name.starts_with(&format!("{}::", phantom_prefix)) {
                 return true;
             }
         }

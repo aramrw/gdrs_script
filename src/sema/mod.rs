@@ -71,9 +71,13 @@ impl SemanticAnalyzer {
                             let ty = if param.name == "self" {
                                 // Resolve self type
                                 if full_target.contains('<') {
-                                    let parts: Vec<_> = full_target.split('<').collect();
-                                    let name = parts[0].to_string();
-                                    Type::Custom(name, Vec::new()) // Simplified generics for now
+                                    if full_target.ends_with("<>") {
+                                        Type::Custom(full_target.clone(), Vec::new())
+                                    } else {
+                                        let parts: Vec<_> = full_target.split('<').collect();
+                                        let name = parts[0].to_string();
+                                        Type::Custom(format!("{}<>", name), Vec::new())
+                                    }
                                 } else {
                                     Type::Custom(full_target.clone(), Vec::new())
                                 }

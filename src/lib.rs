@@ -100,17 +100,23 @@ pub fn run_compiler(file_path: &str) -> Result<(), Box<dyn std::error::Error>> {
                         if u.is_crate {
                             continue;
                         }
-                        if let Some(mod_path) =
-                            resolve_module(current_dir, std_path.as_deref(), &u.path)
-                        {
-                            let abs_mod_path = fs::canonicalize(mod_path).unwrap();
-                            let mod_name = u.path.join("::");
-                            deps.push((mod_name, abs_mod_path.clone()));
-                            if !loaded.contains(&abs_mod_path) {
-                                loaded.insert(abs_mod_path.clone());
-                                queue.push_back(abs_mod_path);
+                        let mut found = false;
+                        for i in (1..=u.path.len()).rev() {
+                            let prefix = &u.path[..i];
+                            if let Some(mod_path) = resolve_module(current_dir, std_path.as_deref(), prefix) {
+                                let abs_mod_path = fs::canonicalize(mod_path).unwrap();
+                                let mod_name = prefix.join("::");
+                                deps.push((mod_name, abs_mod_path.clone()));
+                                if !loaded.contains(&abs_mod_path) {
+                                    loaded.insert(abs_mod_path.clone());
+                                    queue.push_back(abs_mod_path);
+                                }
+                                found = true;
+                                break;
                             }
-                        } else {
+                        }
+
+                        if !found {
                             let mod_name = u.path.join("::");
                             return Err(format!(
                                 "[module error]: Could not resolve module '{}' from {:?}",

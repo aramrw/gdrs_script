@@ -20,11 +20,7 @@ pub fn compile_type_ext(ty: &Type, target_obj: Option<&String>) -> TokenStream {
         }
         Type::Array(inner, size) => {
             let t = compile_type_ext(inner, target_obj);
-            if *size == 0 {
-                quote!(Vec<#t>)
-            } else {
-                quote!([#t; #size])
-            }
+            quote!([#t; #size])
         }
         Type::RawPtr(inner, mutable) => {
             let t = compile_type_ext(inner, target_obj);
@@ -84,8 +80,7 @@ pub fn compile_type_ext(ty: &Type, target_obj: Option<&String>) -> TokenStream {
                     let parts: Vec<_> = obj.split('<').collect();
                     let id = compile_id(parts[0]);
                     let gens_str = parts[1].trim_end_matches('>');
-                    let gens_tokens: Vec<_> = gens_str.split(',').map(|s| {
-                        let s = s.trim();
+                    let gens_tokens: Vec<_> = gens_str.split(',').map(|s| s.trim()).filter(|s| !s.is_empty()).map(|s| {
                         let gid = quote::format_ident!("{}", s);
                         quote!(#gid)
                     }).collect();

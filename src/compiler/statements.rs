@@ -81,7 +81,7 @@ pub fn compile_stmt(
                 quote! {
                     {
                         let __val = (&#v).as_val();
-                        #l.solar_index_mut(#i, __val);
+                        (#l)[crate::SolarAsSize::as_size(&(#i))] = __val;
                     }
                 }
             } else {

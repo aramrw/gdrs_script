@@ -95,6 +95,9 @@ pub(crate) fn parse_generic_args(args_str: &str) -> Vec<TokenStream> {
 
 fn parse_single_generic(s: &str) -> TokenStream {
     let s = s.trim();
+    if s.is_empty() {
+        return quote!();
+    }
     if s.chars().all(|c| c.is_alphanumeric() || c == '_') {
         let gid = quote::format_ident!("{}", s);
         quote!(#gid)
@@ -177,11 +180,13 @@ pub(crate) fn compile_id_ext(name: &str, is_expr: bool) -> TokenStream {
 
     // 4. Resolve namespaces (::)
     if name.contains("::") {
-        let parts: Vec<&str> = name.split("::").collect();
+        let is_absolute = name.starts_with("::");
+        let name_trimmed = name.trim_start_matches("::");
+        let parts: Vec<&str> = name_trimmed.split("::").collect();
         let first = parts[0];
         let rest_tokens = crate::compiler::paths::format_path_parts(&parts[1..]);
 
-        match first {
+        let mut res = match first {
             // ZERO-COST ABSTRACTIONS: Direct access to Rust's std library!
             "std" | "rust" => quote!(::std::#( #rest_tokens )::*),
 
@@ -209,7 +214,12 @@ pub(crate) fn compile_id_ext(name: &str, is_expr: bool) -> TokenStream {
                 let first_id = quote::format_ident!("{}", first);
                 quote!(#first_id::#( #rest_tokens )::*)
             }
+        };
+
+        if is_absolute && !res.to_string().starts_with("::") {
+            res = quote!(::#res);
         }
+        return res;
     } else {
         // 5. Single identifiers (no `::`)
         let clean_name = name.trim_end_matches("<>");

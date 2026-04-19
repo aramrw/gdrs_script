@@ -23,8 +23,14 @@ impl<'a> ExpressionAnalyzer<'a> {
     }
 
     pub fn analyze_expr(&mut self, expr: &mut Expr) -> Result<Type, CompilerError> {
+        let ty = self.analyze_expr_internal(expr)?;
+        expr.ty = Some(ty.clone());
+        Ok(ty)
+    }
+
+    fn analyze_expr_internal(&mut self, expr: &mut Expr) -> Result<Type, CompilerError> {
         let span = expr.span;
-        let ty = match &mut expr.kind {
+        match &mut expr.kind {
             ExprKind::Unit => Ok(Type::Unit),
             ExprKind::Int(_) => Ok(Type::I32),
             ExprKind::Int64(_) => Ok(Type::I64),
@@ -176,17 +182,26 @@ impl<'a> ExpressionAnalyzer<'a> {
                 if name == "Ok" {
                     let val_ty = self.analyze_expr(&mut args[0])?;
                     let ty = Type::Result(Box::new(val_ty), Box::new(Type::Generic("E".into())));
-                    expr.ty = Some(ty.clone());
                     return Ok(ty);
                 } else if name == "Err" {
                     let err_ty = self.analyze_expr(&mut args[0])?;
                     let ty = Type::Result(Box::new(Type::Generic("T".into())), Box::new(err_ty));
-                    expr.ty = Some(ty.clone());
                     return Ok(ty);
                 } else if name == "array_init" {
                     let val_ty = self.analyze_expr(&mut args[0])?;
-                    let ty = Type::RawPtr(Box::new(val_ty), true);
-                    expr.ty = Some(ty.clone());
+                    let _size_ty = self.analyze_expr(&mut args[1])?;
+
+                    // Try to extract a constant size if possible
+                    let (size, is_dynamic) = match &args[1].kind {
+                        ExprKind::Int(v) => (*v as usize, *v == 0),
+                        _ => (0, true), // Dynamic size (Vector<T>)
+                    };
+
+                    if is_dynamic || size == 0 {
+                        return Ok(Type::Custom("std::vec::Vector<>".into(), vec![val_ty]));
+                    }
+
+                    let ty = Type::Array(Box::new(val_ty), size);
                     return Ok(ty);
                 }
 
@@ -216,7 +231,6 @@ impl<'a> ExpressionAnalyzer<'a> {
                         }
                         *resolved_name = Some(name.clone());
                         let ty = Type::Any;
-                        expr.ty = Some(ty.clone());
                         return Ok(ty);
                     }
 
@@ -263,13 +277,11 @@ impl<'a> ExpressionAnalyzer<'a> {
                     }
                     *resolved_obj_name = Some("any".to_string());
                     let ty = Type::Any;
-                    expr.ty = Some(ty.clone());
                     return Ok(ty);
                 }
 
                 if name == "clone" {
                     // Special handling for clone
-                    expr.ty = Some(resolved_lhs_ty.clone());
                     return Ok(resolved_lhs_ty);
                 }
 
@@ -279,7 +291,6 @@ impl<'a> ExpressionAnalyzer<'a> {
                         self.analyze_expr(arg)?;
                     }
                     let ty = Type::Any;
-                    expr.ty = Some(ty.clone());
                     return Ok(ty);
                 }
 
@@ -293,7 +304,7 @@ impl<'a> ExpressionAnalyzer<'a> {
                     Type::I64 => "i64".to_string(),
                     Type::F32 => "f32".to_string(),
                     Type::F64 => "f64".to_string(),
-                    Type::Array(_, _) => "vector".to_string(), // Treat array as vector for method lookup
+                    Type::Array(_, _) => "Array".to_string(), // Treat array as Array for method lookup
                     Type::Custom(n, _) => n.clone(),
                     Type::Generic(n) => {
                         // If it's a generic type, we need to look up method in its bounds
@@ -339,7 +350,6 @@ impl<'a> ExpressionAnalyzer<'a> {
                     *arg_kinds = Some(p_kinds);
 
                     let ty = ret_type.unwrap_or(Type::I32);
-                    expr.ty = Some(ty.clone());
                     return Ok(ty);
                 } else if self.type_info.has_wildcard_phantom {
                     // Fallback to Any if not found but phantom mode is active
@@ -383,7 +393,6 @@ impl<'a> ExpressionAnalyzer<'a> {
                         }
                         *resolved_name = Some(name.clone());
                         let ty = Type::Any;
-                        expr.ty = Some(ty.clone());
                         return Ok(ty);
                     }
 
@@ -579,10 +588,7 @@ impl<'a> ExpressionAnalyzer<'a> {
                     .resolve_type(ty, &self.analysis_info.current_prefix);
                 Ok(resolved_ty)
             }
-        }?;
-        //println!("DEBUG analyze_expr setting ty for {:?}: {:?}", expr.kind, ty);
-        expr.ty = Some(ty.clone());
-        Ok(ty)
+        }
     }
 
     pub fn refine_expr(&mut self, expr: &mut Expr) -> Result<(), CompilerError> {
