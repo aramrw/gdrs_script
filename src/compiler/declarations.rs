@@ -55,15 +55,6 @@ pub fn compile_decls(decls: &[Decl], tokens: &mut TokenStream) {
             Decl::Impl(imp) => {
                 let target = compile_id(&imp.target);
                 let gparams = compile_generics(&imp.generics);
-                let gtarget = if imp.generics.is_empty() {
-                    quote!()
-                } else {
-                    let gids = imp
-                        .generics
-                        .iter()
-                        .map(|(g, _)| quote::format_ident!("{}", g));
-                    quote!(<#( #gids ),*>)
-                };
                 let is_trait_impl = imp.trait_name.is_some();
                 let full_target = if imp.generics.is_empty() {
                     imp.target.clone()
@@ -76,17 +67,30 @@ pub fn compile_decls(decls: &[Decl], tokens: &mut TokenStream) {
                     .iter()
                     .map(|f| compile_function(f, Some(&full_target), is_trait_impl));
 
+                let assoc_types = imp.associated_types.iter().map(|(name, ty)| {
+                    let id = quote::format_ident!("{}", name);
+                    let ct = compile_type(ty);
+                    quote!(type #id = #ct;)
+                });
+
                 if let Some(trait_name) = &imp.trait_name {
                     let tr_name = compile_id(trait_name);
-                    tokens.extend(quote! { impl #gparams #tr_name #gtarget for #target #gtarget { #( #functions )* } });
+                    // Use #target directly as compile_id handles generics if present in the name
+                    tokens.extend(quote! { impl #gparams #tr_name for #target { 
+                        #( #assoc_types )*
+                        #( #functions )* 
+                    } });
                 } else {
-                    tokens.extend(quote! { impl #gparams #target #gtarget { #( #functions )* } });
+                    tokens.extend(quote! { impl #gparams #target { 
+                        #( #assoc_types )*
+                        #( #functions )* 
+                    } });
                 }
 
                 // If it has a destroy method, implement Drop
                 if imp.functions.iter().any(|f| f.name == "destroy") {
                     tokens.extend(quote! {
-                        impl #gparams Drop for #target #gtarget {
+                        impl #gparams Drop for #target {
                             fn drop(&mut self) {
                                 self.destroy();
                             }
@@ -221,6 +225,7 @@ pub fn compile_decls(decls: &[Decl], tokens: &mut TokenStream) {
                     .as_ref()
                     .expect("Extern object must have a rust_path");
                 let target_path = compile_id(rust_path);
+                
                 let gens = if obj.generics.is_empty() {
                     quote!()
                 } else {
@@ -230,6 +235,7 @@ pub fn compile_decls(decls: &[Decl], tokens: &mut TokenStream) {
                         .map(|(g, _)| quote::format_ident!("{}", g));
                     quote!(<#( #gids ),*>)
                 };
+                
                 tokens.extend(quote! {
                     pub type #name #gens = #target_path #gens;
                 });
@@ -241,6 +247,7 @@ pub fn compile_decls(decls: &[Decl], tokens: &mut TokenStream) {
                     .as_ref()
                     .expect("Extern enum must have a rust_path");
                 let target_path = compile_id(rust_path);
+                
                 let gens = if enm.generics.is_empty() {
                     quote!()
                 } else {
@@ -250,6 +257,7 @@ pub fn compile_decls(decls: &[Decl], tokens: &mut TokenStream) {
                         .map(|(g, _)| quote::format_ident!("{}", g));
                     quote!(<#( #gids ),*>)
                 };
+                
                 tokens.extend(quote! {
                     pub type #name #gens = #target_path #gens;
                 });
@@ -348,10 +356,11 @@ pub fn collect_decl_metadata(
             Decl::Function(f)
                 if f.name == "main"
                     && f.is_async
-                    && f.attributes.is_empty()
                     && prefix.is_empty() =>
             {
-                *use_tokio = true;
+                if f.attributes.is_empty() {
+                    *use_tokio = true;
+                }
             }
             Decl::Module(name, inner_decls) => {
                 let new_prefix = if prefix.is_empty() {

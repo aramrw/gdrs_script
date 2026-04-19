@@ -493,6 +493,12 @@ where
         .or(extern_func_parser())
         .then_ignore(just(Token::Semicolon).or_not());
 
+    let associated_type = just(Token::TypeKw)
+        .ignore_then(ident())
+        .then_ignore(just(Token::Eq))
+        .then(type_parser())
+        .then_ignore(just(Token::Semicolon).or_not());
+
     just(Token::Impl)
         .ignore_then(
             generic_params_parser()
@@ -509,21 +515,39 @@ where
         .then_ignore(just(Token::Colon).or_not())
         .then(
             just(Token::Indent)
-                .ignore_then(method.repeated().collect())
+                .ignore_then(
+                    choice((
+                        associated_type.map(|(n, t)| (Some((n, t)), None)),
+                        method.map(|f| (None, Some(f))),
+                    ))
+                    .repeated()
+                    .collect::<Vec<_>>(),
+                )
                 .then_ignore(just(Token::Dedent)),
         )
         .map(
-            |((((impl_gens, trait_or_target), target), target_gens), functions)| {
+            |((((impl_gens, trait_or_target), target), target_gens), members)| {
                 let gens = if impl_gens.is_empty() {
                     target_gens
                 } else {
                     impl_gens
                 };
+                let mut associated_types = Vec::new();
+                let mut functions = Vec::new();
+                for (at, f) in members {
+                    if let Some(a) = at {
+                        associated_types.push(a);
+                    }
+                    if let Some(func) = f {
+                        functions.push(func);
+                    }
+                }
                 if let Some(target_name) = target {
                     ImplDecl {
                         trait_name: Some(trait_or_target),
                         target: target_name,
                         generics: gens,
+                        associated_types,
                         functions,
                     }
                 } else {
@@ -531,6 +555,7 @@ where
                         trait_name: None,
                         target: trait_or_target,
                         generics: gens,
+                        associated_types,
                         functions,
                     }
                 }
@@ -546,6 +571,12 @@ where
 {
     let method = func_parser(stmt.clone())
         .or(extern_func_parser())
+        .then_ignore(just(Token::Semicolon).or_not());
+
+    let associated_type = just(Token::TypeKw)
+        .ignore_then(ident())
+        .then_ignore(just(Token::Eq))
+        .then(type_parser())
         .then_ignore(just(Token::Semicolon).or_not());
 
     just(Token::Extern)
@@ -564,15 +595,35 @@ where
         .then_ignore(just(Token::Colon).or_not())
         .then(
             just(Token::Indent)
-                .ignore_then(method.repeated().collect())
+                .ignore_then(
+                    choice((
+                        associated_type.map(|(n, t)| (Some((n, t)), None)),
+                        method.map(|f| (None, Some(f))),
+                    ))
+                    .repeated()
+                    .collect::<Vec<_>>(),
+                )
                 .then_ignore(just(Token::Dedent)),
         )
         .map(
-            |(((_impl_gens, target), _target_gens), functions)| ImplDecl {
-                trait_name: None,
-                target,
-                generics: _impl_gens,
-                functions,
+            |(((_impl_gens, target), _target_gens), members)| {
+                let mut associated_types = Vec::new();
+                let mut functions = Vec::new();
+                for (at, f) in members {
+                    if let Some(a) = at {
+                        associated_types.push(a);
+                    }
+                    if let Some(func) = f {
+                        functions.push(func);
+                    }
+                }
+                ImplDecl {
+                    trait_name: None,
+                    target,
+                    generics: _impl_gens,
+                    associated_types,
+                    functions,
+                }
             },
         )
 }

@@ -119,14 +119,16 @@ pub(crate) fn compile_id_ext(name: &str, is_expr: bool) -> TokenStream {
     if let Some((prefix, gens_str, suffix)) = extract_brackets(name, '<', '>') {
         let id = compile_id_ext(prefix, is_expr);
         let gens_tokens = parse_generic_args(gens_str);
+        
+        let has_any = gens_str.contains("Any");
 
-        let sep = if is_expr && !gens_tokens.is_empty() {
+        let sep = if is_expr && !gens_tokens.is_empty() && !has_any {
             quote!(::)
         } else {
             quote!()
         };
 
-        let mut res = if gens_tokens.is_empty() {
+        let mut res = if gens_tokens.is_empty() || has_any {
             quote!(#id)
         } else {
             quote!(#id #sep <#( #gens_tokens ),*>)
@@ -244,27 +246,49 @@ fn path_to_string(path: &[PathPart]) -> String {
         .join("::")
 }
 
-fn compile_path(path: &[PathPart], target_obj: Option<&String>) -> TokenStream {
-    let parts: Vec<_> = path
-        .iter()
-        .filter(|p| !p.name.is_empty())
-        .map(|p| {
-            let name_to_use = match p.name.as_str() {
-                "string" => "sr_string",
-                "fs" => "sr_fs",
-                "io" => "sr_io",
-                "math" => "sr_math",
-                _ => &p.name,
-            };
-            let name = quote::format_ident!("{}", name_to_use);
-            if p.generics.is_empty() {
-                quote!(#name)
+pub fn compile_path(path: &[PathPart], target_obj: Option<&String>, is_expr: bool) -> TokenStream {
+    let mut parts: Vec<TokenStream> = Vec::new();
+    let mut start_idx = 0;
+    
+    if let Some(first) = path.first() {
+        if first.name == "std" {
+            if path.len() > 1 {
+                let second = &path[1].name;
+                if ["vec", "option", "fs", "io", "math", "string", "random"].contains(&second.as_str()) {
+                    parts.push(quote!(crate));
+                } else {
+                    parts.push(quote!(::std));
+                }
             } else {
-                let gens = p.generics.iter().map(|g| compile_type_ext(g, target_obj));
-                quote!(#name::<#( #gens ),*>)
+                parts.push(quote!(::std));
             }
-        })
-        .collect();
+            start_idx = 1;
+        }
+    }
+
+    for (i, p) in path.iter().enumerate().skip(start_idx) {
+        if p.name.is_empty() { continue; }
+        
+        let name_to_use = match p.name.as_str() {
+            "string" => "sr_string",
+            "fs" => "sr_fs",
+            "io" => "sr_io",
+            "math" => "sr_math",
+            _ => &p.name,
+        };
+        let name = quote::format_ident!("{}", name_to_use);
+        if p.generics.is_empty() || p.generics.iter().any(|g| matches!(g, Type::Any)) {
+            parts.push(quote!(#name));
+        } else {
+            let gens = p.generics.iter().map(|g| compile_type_ext(g, target_obj));
+            if is_expr && i == path.len() - 1 {
+                parts.push(quote!(#name::<#( #gens ),*>));
+            } else {
+                parts.push(quote!(#name<#( #gens ),*>));
+            }
+        }
+    }
+    
     quote!(#( #parts )::*)
 }
 
@@ -345,7 +369,7 @@ fn wrap_expr_for_ref(expr: &Expr, expected_ty: Option<&Type>, target_obj: Option
                 let is_ref_expected = expected_ty.map_or(true, |et| {
                     match et {
                         Type::Ref(_, _) => true,
-                        Type::Custom(_, _) | Type::Array(_, _) | Type::Managed(_) | Type::ThreadSafe(_) | Type::BoxPtr(_) => true,
+                        Type::Custom(_, _) | Type::Array(_, _) | Type::Managed(_) | Type::ThreadSafe(_) | Type::BoxPtr(_) | Type::Generic(_) => true,
                         _ => false,
                     }
                 });

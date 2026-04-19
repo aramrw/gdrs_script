@@ -1,22 +1,4 @@
-use crate::std::vec::Vec;
+use std::vec::Vec;
 
 fn main():
-    var mut arr = [1, 2, 3]
-    println!("Array: {}", arr[0])
-    println!("Array length: {}", arr.len())
-    arr[0] = 10
-    println!("Modified array: {}", arr[0])
-
-    println!(typeof!(arr))
-    
-    var s = 5
-    var mut dyn_arr = [0; s]
-    println!("Dynamic array length: {}", dyn_arr.len())
-    dyn_arr.push(1)
-    println!("Dynamic array modified length: {}", dyn_arr.len())
-    println!("Dynamic array last item: {}", dyn_arr.get(5))
-
-    var mut fixed_arr: [i32; 10] = [0; 10]
-    println!("Fixed array length: {}", fixed_arr.len())
-    fixed_arr[5] = 42
-    println!("Fixed array at 5: {}", fixed_arr[5])
+    var vecs: Vec<&i32> = vec![0, 2, 5, 7];

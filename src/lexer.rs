@@ -41,6 +41,8 @@ pub enum Token {
     As,
     Break,
     Loop,
+    In,
+    TypeKw,
     // Types
     I32,
     I64,
@@ -89,6 +91,8 @@ pub enum Token {
     Indent,
     Dedent,
     Attribute(String),
+    AddAssign,
+    SubAssign
 }
 
 impl fmt::Display for Token {
@@ -130,6 +134,8 @@ impl Token {
             Token::Dependency => "dependency".to_string(),
             Token::As => "as".to_string(),
             Token::For => "for".to_string(),
+            Token::In => "in".to_string(),
+            Token::TypeKw => "type".to_string(),
             Token::Break => "break".to_string(),
             Token::Loop => "loop".to_string(),
             Token::I32 => "i32".to_string(),
@@ -176,6 +182,8 @@ impl Token {
             Token::Dedent => "".to_string(),
             Token::Attribute(s) => format!("#[{}]", s),
             Token::Modulo => "%".into(),
+            Token::AddAssign => "+=".into(),
+            Token::SubAssign => "-=".into(),
         }
     }
 }
@@ -299,7 +307,14 @@ pub fn lex(source: &str) -> Result<Vec<(Token, Span)>, LexError> {
                 }
                 ',' => tokens.push((Token::Comma, span(1))),
                 ';' => tokens.push((Token::Semicolon, span(1))),
-                '+' => tokens.push((Token::Plus, span(1))),
+                '+' => {
+                    if chars.peek().map(|&(_, c)| c) == Some('=') {
+                        chars.next();
+                        tokens.push((Token::AddAssign, span(2)));
+                    } else {
+                        tokens.push((Token::Plus, span(1)));
+                    }
+                }
                 '&' => tokens.push((Token::Amp, span(1))),
                 '%' => tokens.push((Token::Modulo, span(1))),
                 '*' => tokens.push((Token::Star, span(1))),
@@ -484,6 +499,8 @@ pub fn lex(source: &str) -> Result<Vec<(Token, Span)>, LexError> {
                         "rust" => tokens.push((Token::Rust, span)),
                         "as" => tokens.push((Token::As, span)),
                         "for" => tokens.push((Token::For, span)),
+                        "in" => tokens.push((Token::In, span)),
+                        "type" => tokens.push((Token::TypeKw, span)),
                         "async" => tokens.push((Token::Async, span)),
                         "await" => tokens.push((Token::Await, span)),
                         "dependency" => tokens.push((Token::Dependency, span)),

@@ -19,12 +19,8 @@ pub fn compile_function(
         let attr = a.parse::<TokenStream>().expect("Failed to parse attribute");
         quote! { #[#attr] }
     });
-    let main_attr = if func.name == "main" && func.is_async {
-        if func.attributes.is_empty() {
-            quote!(#[tokio::main])
-        } else {
-            quote!()
-        }
+    let main_attr = if func.name == "main" && func.is_async && func.attributes.is_empty() {
+        quote!(#[tokio::main])
     } else {
         quote!()
     };

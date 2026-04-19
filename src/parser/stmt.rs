@@ -102,6 +102,19 @@ where
             })
             .into_stmt();
 
+        let for_stmt = just(Token::For)
+            .ignore_then(ident())
+            .then_ignore(just(Token::In))
+            .then(expr.clone())
+            .then_ignore(just(Token::Colon))
+            .then(block.clone())
+            .map(|((var_name, iterator), body)| StmtKind::For {
+                var_name,
+                iterator,
+                body: Box::new(body),
+            })
+            .into_stmt();
+
         let loop_stmt = just(Token::Loop)
             .ignore_then(just(Token::Colon).or_not())
             .then(block.clone())
@@ -198,6 +211,7 @@ where
             block,
             if_stmt,
             while_stmt,
+            for_stmt,
             loop_stmt,
             break_stmt,
             return_stmt,

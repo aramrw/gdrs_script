@@ -1,2 +1,2 @@
+// Empty body. Methods are registered in semantic analyzer and handled by compiler.
 extern obj Vector<T> = "::std::vec::Vec":
-    # Empty body. Methods are registered in semantic analyzer and handled by compiler.

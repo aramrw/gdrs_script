@@ -314,7 +314,8 @@ where
         .or(just(Token::Modulo).to(BinaryOp::Modulo));
     let add_op = just(Token::Plus)
         .to(BinaryOp::Add)
-        .or(just(Token::Minus).to(BinaryOp::Subtract));
+        .or(just(Token::Minus).to(BinaryOp::Subtract))
+        .or(just(Token::AddAssign).to(BinaryOp::AddAssign));
     let cmp_op = choice((
         just(Token::GtEq).to(BinaryOp::GreaterThanOrEqual),
         just(Token::LtEq).to(BinaryOp::LessThanOrEqual),

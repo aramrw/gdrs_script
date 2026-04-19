@@ -2,9 +2,6 @@
 
 use crate::ast::*;
 use crate::error::CompilerError;
-use crate::lexer::Span;
-use miette::SourceSpan;
-use std::collections::{HashMap, HashSet}; // Required for context if called standalone
 
 use super::AnalysisInfo;
 use crate::sema::types::TypeInfo;
@@ -39,7 +36,7 @@ impl<'a> ExpressionAnalyzer<'a> {
             ExprKind::Bool(_) => Ok(Type::Bool),
             ExprKind::String(_) => Ok(Type::Str), // Assuming String literals are of type Str
             ExprKind::Variable(path) => {
-                let name = self.analysis_info.path_to_string(path);
+                let name = self.analysis_info.path_to_string(path, self.type_info);
 
                 // Check for await promotion
                 let await_promoted =
@@ -56,11 +53,35 @@ impl<'a> ExpressionAnalyzer<'a> {
                 }
 
                 if let Some((ty, _)) = self.analysis_info.symbols.get(&name) {
+                    if await_promoted {
+                        // Return Managed type if promoted
+                        return Ok(Type::Managed(Box::new(ty.clone())));
+                    }
                     Ok(ty.clone())
-                } else if self.type_info.functions.contains_key(&name) {
-                    // Check if it's a function name
-                    Ok(Type::Any) // Function call without args is type Any for now
                 } else {
+                    // Try lookup in enums for variants without payload
+                    if name.contains("::") {
+                        let parts: Vec<_> = name.split("::").collect();
+                        if parts.len() >= 2 {
+                            let (enum_parts, variant) = parts.split_at(parts.len() - 1);
+                            let mut enum_name = enum_parts.join("::");
+                            if !enum_name.contains('<') {
+                                enum_name = format!("{}<>", enum_name);
+                            }
+                            if let Some((variants, generics)) = self.type_info.enums.get(&enum_name) {
+                                if let Some(variant_params) = variants.get(variant[0]) {
+                                    if variant_params.is_empty() {
+                                        let mut resolved_generics = Vec::new();
+                                        for (gname, _) in generics {
+                                            resolved_generics.push(Type::Generic(gname.clone()));
+                                        }
+                                        return Ok(Type::Custom(enum_name, resolved_generics));
+                                    }
+                                }
+                            }
+                        }
+                    }
+
                     // Check if it's a phantom type
                     let is_phantom = path.iter().any(|p| self.type_info.is_phantom_type(&p.name));
                     if is_phantom || self.type_info.has_wildcard_phantom {
@@ -111,7 +132,8 @@ impl<'a> ExpressionAnalyzer<'a> {
                             }
                             Ok(l_base)
                         }
-                        _ => Ok(l_base), // For other ops like +, -, *, /, return the base type
+                        BinaryOp::AddAssign | _ => Ok(l_base),
+                        // For other ops like +, -, *, /, return the base type
                     }
                 }
             }
@@ -127,13 +149,18 @@ impl<'a> ExpressionAnalyzer<'a> {
                     self.analyze_expr(arg)?;
                 }
                 // Macro return types are simplified for now
-                if name == "typeof" {
-                    Ok(Type::Str)
-                } else if name == "str" {
-                    Ok(Type::String) // str!() returns owned string
-                } else {
-                    Ok(Type::I32) // Default to I32 or Unit for other macros
-                }
+
+                let _type = match name.as_str() {
+                    "tyepof" => Type::Str,
+                    "str" => Type::String,
+                    "vec" => Type::Any,
+                    "println" | "print" => Type::Unit,
+                    _ => {
+                        // Trust other macros for now
+                        Type::Any
+                    }
+                };
+                Ok(_type)
             }
             ExprKind::Array(items) => {
                 if items.is_empty() {
@@ -175,7 +202,7 @@ impl<'a> ExpressionAnalyzer<'a> {
                 Ok(last_ty)
             }
             ExprKind::Call(path, args, resolved_name, arg_kinds, param_types_field) => {
-                let name = self.analysis_info.path_to_string(path);
+                let name = self.analysis_info.path_to_string(path, self.type_info);
                 //println!("DEBUG analyze Call name={}, current_prefix={}", name, self.analysis_info.current_prefix);
 
                 // Handle special calls like Ok() and Err()
@@ -220,6 +247,89 @@ impl<'a> ExpressionAnalyzer<'a> {
                         Some((name_to_lookup.clone(), param_types.clone(), rt.clone()));
                 } else if let Some((param_types, rt)) = self.type_info.functions.get(&name) {
                     found_name_and_ret = Some((name.clone(), param_types.clone(), rt.clone()));
+                } else if let Some((param_types, rt)) = self
+                    .type_info
+                    .functions
+                    .get(&format!("{}<>", name_to_lookup))
+                {
+                    found_name_and_ret = Some((
+                        format!("{}<>", name_to_lookup),
+                        param_types.clone(),
+                        rt.clone(),
+                    ));
+                } else if let Some((param_types, rt)) =
+                    self.type_info.functions.get(&format!("{}<>", name))
+                {
+                    found_name_and_ret =
+                        Some((format!("{}<>", name), param_types.clone(), rt.clone()));
+                } else {
+                    // Try removing :: parts to see if it's a method on a generic type that was registered with <>
+                    // e.g. std::vec::Vector::new -> std::vec::Vector<>::new
+                    if name_to_lookup.contains("::") {
+                        let parts: Vec<_> = name_to_lookup.split("::").collect();
+                        if parts.len() >= 2 {
+                            let (target, method) = parts.split_at(parts.len() - 1);
+                            let alt_name = format!("{}<>::{}", target.join("::"), method[0]);
+                            if let Some((param_types, rt)) = self.type_info.functions.get(&alt_name) {
+                                found_name_and_ret = Some((alt_name, param_types.clone(), rt.clone()));
+                            }
+                        }
+                    }
+                    if found_name_and_ret.is_none() && name.contains("::") {
+                        let parts: Vec<_> = name.split("::").collect();
+                        if parts.len() >= 2 {
+                            let (target, method) = parts.split_at(parts.len() - 1);
+                            let alt_name = format!("{}<>::{}", target.join("::"), method[0]);
+                            if let Some((param_types, rt)) = self.type_info.functions.get(&alt_name) {
+                                found_name_and_ret = Some((alt_name, param_types.clone(), rt.clone()));
+                            }
+                        }
+                    }
+                }
+
+                if found_name_and_ret.is_none() {
+                    // Try looking up in enums
+                    if name_to_lookup.contains("::") {
+                        let parts: Vec<_> = name_to_lookup.split("::").collect();
+                        if parts.len() >= 2 {
+                            let (enum_parts, variant) = parts.split_at(parts.len() - 1);
+                            let mut enum_name = enum_parts.join("::");
+                            if !enum_name.contains('<') {
+                                enum_name = format!("{}<>", enum_name);
+                            }
+                            if let Some((variants, generics)) = self.type_info.enums.get(&enum_name) {
+                                if let Some(_variant_params) = variants.get(variant[0]) {
+                                    // Found an enum variant!
+                                    // For now, return the custom type.
+                                    // TODO: Proper variant parameter check and generic resolution.
+                                    let mut resolved_generics = Vec::new();
+                                    for (gname, _) in generics {
+                                        resolved_generics.push(Type::Generic(gname.clone()));
+                                    }
+                                    return Ok(Type::Custom(enum_name, resolved_generics));
+                                }
+                            }
+                        }
+                    }
+                    if name.contains("::") {
+                         let parts: Vec<_> = name.split("::").collect();
+                        if parts.len() >= 2 {
+                            let (enum_parts, variant) = parts.split_at(parts.len() - 1);
+                            let mut enum_name = enum_parts.join("::");
+                            if !enum_name.contains('<') {
+                                enum_name = format!("{}<>", enum_name);
+                            }
+                            if let Some((variants, generics)) = self.type_info.enums.get(&enum_name) {
+                                if let Some(_variant_params) = variants.get(variant[0]) {
+                                    let mut resolved_generics = Vec::new();
+                                    for (gname, _) in generics {
+                                        resolved_generics.push(Type::Generic(gname.clone()));
+                                    }
+                                    return Ok(Type::Custom(enum_name, resolved_generics));
+                                }
+                            }
+                        }
+                    }
                 }
 
                 if found_name_and_ret.is_none() {
@@ -240,8 +350,22 @@ impl<'a> ExpressionAnalyzer<'a> {
                     );
                 }
 
-                let (resolved_func_name, params, ret_type) = found_name_and_ret.unwrap();
-                //println!("DEBUG analyze Call resolved_func_name={}", resolved_func_name);
+                let (resolved_func_name, params, mut ret_type) = found_name_and_ret.unwrap();
+                
+                // Generic substitution: replace Generic("T") with Any for now
+                if let Some(Type::Custom(name, generics)) = &mut ret_type {
+                    if (name == "std::vec::Vector<>" || name == "std::option::Option<>") && generics.len() == 1 {
+                        if let Type::Generic(g) = &generics[0] {
+                            if g == "T" {
+                                generics[0] = Type::Any;
+                            }
+                        }
+                    }
+                }
+                
+                // Ensure the expression itself has this type so compile_expr can see it
+                expr.ty = ret_type.clone();
+                
                 *resolved_name = Some(resolved_func_name.clone());
 
                 let p_types: Vec<Type> = params.iter().map(|(t, _)| t.clone()).collect();
@@ -366,7 +490,7 @@ impl<'a> ExpressionAnalyzer<'a> {
                 fields,
                 resolved_name,
             } => {
-                let name = self.analysis_info.path_to_string(path);
+                let name = self.analysis_info.path_to_string(path, self.type_info);
                 let is_phantom = path.iter().any(|p| self.type_info.is_phantom_type(&p.name));
 
                 // Attempt to resolve struct name

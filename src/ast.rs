@@ -40,6 +40,8 @@ pub enum BinaryOp {
     LessThanOrEqual,
     Equal,
     Modulo,
+    AddAssign,
+    SubAssign
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -146,6 +148,11 @@ pub enum StmtKind {
         condition: Expr,
         body: Box<Stmt>,
     },
+    For {
+        var_name: String,
+        iterator: Expr,
+        body: Box<Stmt>,
+    },
     Loop {
         body: Box<Stmt>,
     },
@@ -237,6 +244,7 @@ pub struct ImplDecl {
     pub trait_name: Option<String>,
     pub target: String,
     pub generics: Vec<(String, Vec<String>)>,
+    pub associated_types: Vec<(String, Type)>,
     pub functions: Vec<Function>,
 }
 

@@ -39,6 +39,12 @@ impl SemanticAnalyzer {
             match decl {
                 Decl::Function(func) => {
                     self.analysis_info.symbols.clear();
+                    
+                    let old_gens = self.type_info.generic_params.clone();
+                    for (name, bounds) in &func.generics {
+                        self.type_info.generic_params.insert(name.clone(), bounds.clone());
+                    }
+
                     // Add parameters to symbols
                     for param in &func.params {
                         let ty = self.type_info.resolve_type(&param.ty, prefix);
@@ -46,6 +52,8 @@ impl SemanticAnalyzer {
                     }
                     let mut stmt_analyzer = StatementAnalyzer::new(&mut self.analysis_info, &mut self.type_info);
                     stmt_analyzer.analyze_stmt(&mut func.body)?;
+
+                    self.type_info.generic_params = old_gens;
                 }
                 Decl::Impl(imp) => {
                     let mut full_target = if prefix.is_empty() {

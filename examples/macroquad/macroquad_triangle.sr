@@ -1,3 +1,7 @@
+rust dependency macroquad = { version = "0.3" }
+rust dependency "macroquad-particles" = { version = "0.1.0", features = ["nanoserde"] }
+rust dependency nanoserde = "0.1"
+
 // Added math for rotation logic
 use crate::macroquad::prelude::*;
 use crate::macroquad::math::Vec2
@@ -13,7 +17,7 @@ impl Triangle:
     fn get_centroid(&self) -> Vec2:
         vec2(
             (self.a.x + self.b.x + self.c.x) / 3.0,
-            (self.p.y + self.b.y + self.c.y) / 3.0
+            (self.a.y + self.b.y + self.c.y) / 3.0
         )
 
     // Rotates a point around a pivot
@@ -68,7 +72,7 @@ async fn gameloop(mut t: Triangle):
 
 #[macroquad::main("InterativeTriangle")]
 async fn main():
-    var t = Triangle { 
+    var mut t = Triangle { 
         a: vec2(200.0, 500.0),
         b: vec2(400.0, 200.0),
         c: vec2(600.0, 500.0),

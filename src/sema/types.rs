@@ -166,7 +166,7 @@ impl TypeInfo {
         );
         type_info.functions.insert(
             "std::vec::Vector<>::push".to_string(),
-            (vec![(Type::Generic("T".into()), ArgKind::Value)], None),
+            (vec![(Type::Ref(Box::new(Type::Generic("T".into())), false), ArgKind::Ref)], None),
         );
         type_info.functions.insert(
             "std::vec::Vector<>::pop".to_string(),
@@ -180,10 +180,27 @@ impl TypeInfo {
             "std::vec::Vector<>::len".to_string(),
             (vec![], Some(Type::I32)),
         );
+        // Register Option enum
+        let mut option_variants = HashMap::new();
+        option_variants.insert("Some".to_string(), vec![Type::Generic("T".into())]);
+        option_variants.insert("None".to_string(), vec![]);
+        type_info.enums.insert("std::option::Option<>".to_string(), (option_variants, vec![("T".into(), vec![])]));
+        type_info.aliases.insert("Option".to_string(), "std::option::Option".to_string());
+
         type_info.functions.insert(
             "std::vec::Vector<>::new".to_string(),
-            (vec![(Type::Generic("T".into()), ArgKind::Value)], Some(Type::Custom("std::vec::Vector<>".into(), vec![Type::Generic("T".into())]))),
+            (vec![], Some(Type::Custom("std::vec::Vector<>".into(), vec![Type::Generic("T".into())]))),
         );
+
+        type_info.functions.insert(
+            "std::option::Option<>::Some".to_string(),
+            (vec![(Type::Generic("T".into()), ArgKind::Value)], Some(Type::Custom("std::option::Option<>".into(), vec![Type::Generic("T".into())]))),
+        );
+        type_info.functions.insert(
+            "std::option::Option<>::None".to_string(),
+            (vec![], Some(Type::Custom("std::option::Option<>".into(), vec![Type::Generic("T".into())]))),
+        );
+
         type_info
     }
 
@@ -198,91 +215,35 @@ impl TypeInfo {
             Type::ThreadSafe(inner) => Type::ThreadSafe(Box::new(self.resolve_type(inner, prefix))),
             Type::WeakManaged(inner) => Type::WeakManaged(Box::new(self.resolve_type(inner, prefix))),
             Type::WeakThreadSafe(inner) => Type::WeakThreadSafe(Box::new(self.resolve_type(inner, prefix))),
-            Type::Array(inner, size) => Type::Array(Box::new(self.resolve_type(inner, prefix)), *size),
-            Type::SelfType => {
-                // This logic is currently in mod.rs for `analyze_function`, but `resolve_type` is called *during* that analysis.
-                // It should probably live with the symbol table, which will be in `analysis.rs`.
-                // For now, let's assume it will be handled by `analysis.rs` context.
-                // Returning Any as a placeholder.
-                Type::Any 
-            }
-            Type::Custom(name, generics) => {
-                if self.generic_params.contains_key(name) {
-                    Type::Generic(name.clone())
-                } else if name == "String" {
-                    Type::String
-                } else if name == "File" {
-                    Type::File
-                } else if name == "any" {
-                    Type::Any
-                } else {
-                    let resolved_generics: Vec<_> =
-                        generics.iter().map(|g| self.resolve_type(g, prefix)).collect();
-
-                    let mut name_to_lookup = name.clone();
-                    // NOTE: Logic for 'Self' and 'self' needs context from symbol table (current_obj),
-                    // which belongs in analysis.rs. This part needs to be carefully managed.
-                    if name == "Self" || name == "self" {
-                        // Placeholder: This requires symbol table context (current_obj)
-                        // This will be resolved in analysis.rs
-                        if !resolved_generics.is_empty() {
-                             name_to_lookup = format!("{}<>", name_to_lookup); // Add <> if generics are resolved
-                        }
-                    } else if name.contains("::") {
-                        let parts: Vec<&str> = name.split("::").collect();
-                        if let Some(alias) = self.aliases.get(parts[0]) {
-                            name_to_lookup = format!("{}::{}", alias, parts[1..].join("::"));
-                        }
-                    } else if let Some(alias) = self.aliases.get(name) {
-                        name_to_lookup = alias.clone();
-                    } else {
-                        if !prefix.is_empty() {
-                            let prefixed = format!("{}::{}", prefix, name); 
-                            if self.objects.contains_key(&prefixed)
-                                || self.objects.contains_key(&format!("{}<>", prefixed))
-                                || self.enums.contains_key(&prefixed)
-                                || self.enums.contains_key(&format!("{}<>", prefixed))
-                                || self.traits.contains_key(&prefixed)
-                                || self.traits.contains_key(&format!("{}<>", prefixed))
-                            {
-                                name_to_lookup = prefixed;
-                            }
-                        }
-                    }
-
-                    if !resolved_generics.is_empty() && !name_to_lookup.ends_with("<>") {
-                        let generic_name = format!("{}<>", name_to_lookup);
-                        Type::Custom(generic_name, resolved_generics)
-                    } else {
-                        Type::Custom(name_to_lookup, resolved_generics)
-                    }
-                }
-            }
             Type::Result(ok, err) => Type::Result(
                 Box::new(self.resolve_type(ok, prefix)),
                 Box::new(self.resolve_type(err, prefix)),
             ),
+            Type::Tuple(types) => {
+                Type::Tuple(types.iter().map(|t| self.resolve_type(t, prefix)).collect())
+            }
+            Type::Array(inner, size) => Type::Array(Box::new(self.resolve_type(inner, prefix)), *size),
+            Type::Custom(name, generics) => {
+                let mut resolved_name = self.aliases.get(name).cloned().unwrap_or_else(|| {
+                    if !name.contains("::") && !prefix.is_empty() {
+                        format!("{}::{}", prefix, name)
+                    } else {
+                        name.clone()
+                    }
+                });
+                if !generics.is_empty() && !resolved_name.contains('<') {
+                    resolved_name = format!("{}<>", resolved_name);
+                }
+                let resolved_generics = generics
+                    .iter()
+                    .map(|g| self.resolve_type(g, prefix))
+                    .collect();
+                Type::Custom(resolved_name, resolved_generics)
+            }
             _ => ty.clone(),
         }
     }
-    
-    // Placeholder for path resolution logic that might need context from analysis.rs
-    pub fn resolve_path(&self, path: &[PathPart]) -> String {
-        // This is a simplified version. The full logic involves checking aliases,
-        // current prefix, and known types. This will need to be integrated with
-        // analysis.rs context if it depends on `current_prefix` or `aliases` that
-        // might be managed differently.
-        let mut full_path = String::new();
-        for (i, part) in path.iter().enumerate() {
-            if i > 0 {
-                full_path.push_str("::");
-            }
-            full_path.push_str(&part.name);
-        }
-        full_path
-    }
 
-    // Logic to collect type declarations (objects, enums, traits, functions, impls, uses)
     pub fn collect_decls(&mut self, decls: &[Decl], prefix: &str) -> Result<(), CompilerError> {
         for decl in decls {
             match decl {
@@ -388,7 +349,11 @@ impl TypeInfo {
                     }
 
                     // Store function signatures. Generic parameters are resolved later in analysis.
-                    // For now, we just record them.
+                    let old_gens = self.generic_params.clone();
+                    for (name, bounds) in &func.generics {
+                        self.generic_params.insert(name.clone(), bounds.clone());
+                    }
+
                     let mut resolved_params = Vec::new();
                     for p in &func.params {
                         let ty = self.resolve_type(&p.ty, prefix);
@@ -403,6 +368,7 @@ impl TypeInfo {
                     let resolved_ret = func.return_type.as_ref().map(|t| self.resolve_type(t, prefix));
 
                     self.functions.insert(final_name.clone(), (resolved_params, resolved_ret));
+                    self.generic_params = old_gens;
                     //println!("DEBUG collect_decls added function: {}", final_name);
                 }
                 Decl::Module(name, inner) => {
@@ -419,7 +385,9 @@ impl TypeInfo {
                     if new_prefix.contains("::") {
                         let parts: Vec<&str> = new_prefix.split("::").collect();
                         let last_part = parts.last().unwrap();
-                        self.aliases.insert(last_part.to_string(), new_prefix.clone());
+                        if *last_part != "mod" {
+                            self.aliases.insert(last_part.to_string(), new_prefix.clone());
+                        }
                     }
                     self.collect_decls(inner, &new_prefix)?;
                 }
@@ -432,8 +400,10 @@ impl TypeInfo {
                     if !u.path.is_empty() {
                         let full_path = u.path.join("::");
                         let last_part = u.path.last().unwrap();
-                        // Use alias for the last part of the path
-                        self.aliases.insert(last_part.clone(), full_path);
+                        if last_part != "mod" {
+                            // Use alias for the last part of the path
+                            self.aliases.insert(last_part.clone(), full_path);
+                        }
                     }
                     if u.is_wildcard {
                         self.has_wildcard_phantom = true;
@@ -445,7 +415,6 @@ impl TypeInfo {
         Ok(())
     }
 
-    // Logic to collect information from implementation blocks
     pub fn collect_impls(&mut self, decls: &[Decl], prefix: &str) -> Result<(), CompilerError> {
         for decl in decls {
             match decl {
@@ -461,45 +430,53 @@ impl TypeInfo {
                     };
 
                     // Handle generic impl targets (e.g., `impl<T> MyObj<T>`)
-                    // This assumes `MyObj<>` is already registered in `self.objects` or `self.enums`
                     if !imp.generics.is_empty() && !full_target.ends_with("<>") {
                         full_target = format!("{}<>", full_target);
                     }
 
-                    // Store generic parameters of the impl block and its functions
-                    let old_gens = self.generic_params.clone(); // Save current generic params
+                    let is_trait_impl = imp.trait_name.is_some();
+
+                    let old_gens = self.generic_params.clone();
                     for (name, bounds) in &imp.generics {
                         self.generic_params.insert(name.clone(), bounds.clone());
                     }
 
                     for func in &imp.functions {
-                        // Store method signatures, namespaced by the target type
-                        let method_full_name = format!("{}::{}", full_target, func.name);
-                        let sig_params: Vec<_> = func
-                            .params
-                            .iter()
-                            .map(|p| {
-                                let ty = if p.name == "self" {
-                                    // Resolve self type
-                                    if full_target.contains('<') {
+                        let method_full_name = if is_trait_impl {
+                            let mut tr_name = imp.trait_name.as_ref().unwrap().clone();
+                            if !tr_name.contains("::") && !prefix.is_empty() {
+                                tr_name = format!("{}::{}", prefix, tr_name);
+                            }
+                            format!("{}<>::{}", full_target, func.name)
+                        } else {
+                            format!("{}::{}", full_target, func.name)
+                        };
+
+                        let mut sig_params = Vec::new();
+                        for p in &func.params {
+                            let ty = if p.name == "self" {
+                                if full_target.contains('<') {
+                                    if full_target.ends_with("<>") {
+                                        Type::Custom(full_target.clone(), Vec::new())
+                                    } else {
                                         let parts: Vec<_> = full_target.split('<').collect();
                                         let name = parts[0].to_string();
-                                        Type::Custom(name, Vec::new()) // Simplified generics for now
-                                    } else {
-                                        Type::Custom(full_target.clone(), Vec::new())
+                                        Type::Custom(format!("{}<>", name), Vec::new())
                                     }
                                 } else {
-                                    self.resolve_type(&p.ty, prefix)
-                                };
-                                let kind = match &ty {
-                                    Type::Ref(_, true) => ArgKind::MutRef,
-                                    Type::Ref(_, false) => ArgKind::Ref,
-                                    _ if p.is_mutable => ArgKind::MutRef,
-                                    _ => ArgKind::Value,
-                                };
-                                (ty, kind)
-                            })
-                            .collect();
+                                    Type::Custom(full_target.clone(), Vec::new())
+                                }
+                            } else {
+                                self.resolve_type(&p.ty, prefix)
+                            };
+                            let kind = match &ty {
+                                Type::Ref(_, true) => ArgKind::MutRef,
+                                Type::Ref(_, false) => ArgKind::Ref,
+                                _ if p.is_mutable => ArgKind::MutRef,
+                                _ => ArgKind::Value,
+                            };
+                            sig_params.push((ty, kind));
+                        }
                         let sig_ret = func.return_type.as_ref().map(|t| self.resolve_type(t, prefix));
                         //println!("DEBUG collect_impls added method: {}", method_full_name);
                         self.functions.insert(method_full_name, (sig_params, sig_ret));

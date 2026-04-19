@@ -135,21 +135,29 @@ pub(crate) fn generate_solar_std(has_macroquad: bool) -> TokenStream {
     pub trait SolarVec<T> {
         fn solar_len(&self) -> i32;
         fn solar_get(&self, i: &i32) -> Option<T>;
-        fn solar_push(&mut self, item: T);
+        fn solar_push(&mut self, item: &T);
         fn solar_pop(&mut self) -> Option<T>;
     }
 
     impl<T: Clone> SolarVec<T> for Vec<T> {
-        fn solar_len(&self) -> i32 { self.len() as i32 }
-        fn solar_get(&self, i: &i32) -> Option<T> { self.get(*i as usize).cloned() }
-        fn solar_push(&mut self, item: T) { self.push(item); }
-        fn solar_pop(&mut self) -> Option<T> { self.pop() }
+        fn solar_len(&self) -> i32 {
+            self.len() as i32
+        }
+        fn solar_get(&self, i: &i32) -> Option<T> {
+            self.get(*i as usize).cloned()
+        }
+        fn solar_push(&mut self, item: &T) {
+            self.push(item.clone());
+        }
+        fn solar_pop(&mut self) -> Option<T> {
+            self.pop()
+        }
     }
 
     impl<T: Clone, const N: usize> SolarVec<T> for [T; N] {
         fn solar_len(&self) -> i32 { N as i32 }
         fn solar_get(&self, i: &i32) -> Option<T> { self.get(*i as usize).cloned() }
-        fn solar_push(&mut self, _item: T) { panic!("push not supported on fixed-size array"); }
+        fn solar_push(&mut self, _item: &T) { panic!("push not supported on fixed-size array"); }
         fn solar_pop(&mut self) -> Option<T> { panic!("pop not supported on fixed-size array"); }
     }
 

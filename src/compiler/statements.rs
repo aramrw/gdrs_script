@@ -143,6 +143,12 @@ pub fn compile_stmt(
             let body_tokens = compile_stmt(body, false, target_obj, expected_ret);
             quote! { while #cond { #body_tokens } }
         }
+        StmtKind::For { var_name, iterator, body } => {
+            let id = quote::format_ident!("{}", var_name);
+            let iter = compile_expr(iterator, target_obj, false);
+            let body_tokens = compile_stmt(body, false, target_obj, expected_ret);
+            quote! { for #id in #iter { #body_tokens } }
+        }
         StmtKind::Loop { body } => {
             let body_tokens = compile_stmt(body, false, target_obj, expected_ret);
             quote! { loop { #body_tokens } }

@@ -1,0 +1,24 @@
+use crate::std::vec::Vec;
+
+fn ptype<T>(val: T):
+  println!(typeof!(val))
+
+fn _mut():
+    var arr = [1, 2, 3]
+    var mut i = 0
+    while i < arr.len():
+        println!(arr[i])
+        i += 1
+    ptype(arr)
+
+fn not_mut():
+    var arr = [1, 2, 3]
+    var mut i = 0
+    while i < arr.len():
+        println!(arr[i])
+        i += 1
+    ptype(arr)
+
+fn main():
+    _mut()
+    not_mut()

@@ -30,13 +30,13 @@ impl<'a> StatementAnalyzer<'a> {
         match &mut stmt.kind {
             StmtKind::VarDecl {
                 name,
-                is_mutable: _,
+                is_mutable,
                 ty,
                 value,
             } => {
                 self.analysis_info
                     .var_declarations
-                    .insert(name.clone(), (self.analysis_info.scope_depth, false));
+                    .insert(name.clone(), (self.analysis_info.scope_depth, *is_mutable));
                 let val_ty = self.analyze_expr(value)?; // Use expression analyzer
                 let expected_ty = ty.as_ref().map(|t| self.type_info.resolve_type(t, &self.analysis_info.current_prefix));
                 if let Some(et) = expected_ty {
@@ -91,6 +91,21 @@ impl<'a> StatementAnalyzer<'a> {
                     )?;
                 }
                 self.analyze_stmt(body)?;
+                Ok(())
+            }
+            StmtKind::For { var_name, iterator, body } => {
+                let _iter_ty = self.analyze_expr(iterator)?;
+                
+                let old_symbols = self.analysis_info.symbols.clone();
+                self.analysis_info.scope_depth += 1;
+                
+                // For now, treat the loop variable as Type::Any
+                self.analysis_info.symbols.insert(var_name.clone(), (Type::Any, false));
+                
+                self.analyze_stmt(body)?;
+                
+                self.analysis_info.scope_depth -= 1;
+                self.analysis_info.symbols = old_symbols;
                 Ok(())
             }
             StmtKind::Loop { body } => {
@@ -155,6 +170,10 @@ impl<'a> StatementAnalyzer<'a> {
             }
             StmtKind::While { condition, body } => {
                 self.refine_expr(condition)?;
+                self.refine_stmt(body)?;
+            }
+            StmtKind::For { iterator, body, .. } => {
+                self.refine_expr(iterator)?;
                 self.refine_stmt(body)?;
             }
             StmtKind::Loop { body } => {

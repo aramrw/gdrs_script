@@ -22,8 +22,21 @@ impl AnalysisInfo {
         }
     }
 
-    pub fn path_to_string(&self, path: &[crate::ast::PathPart]) -> String {
-        path.iter().map(|p| p.name.clone()).collect::<Vec<_>>().join("::")
+    pub fn path_to_string(&self, path: &[crate::ast::PathPart], type_info: &crate::sema::types::TypeInfo) -> String {
+        let mut full_name = String::new();
+        for (i, p) in path.iter().enumerate() {
+            if i == 0 {
+                if let Some(alias) = type_info.aliases.get(&p.name) {
+                    full_name = alias.clone();
+                } else {
+                    full_name = p.name.clone();
+                }
+            } else {
+                full_name.push_str("::");
+                full_name.push_str(&p.name);
+            }
+        }
+        full_name
     }
 
     pub fn promote_variable(&mut self, _name: &str, _is_await: bool) {
@@ -31,11 +44,31 @@ impl AnalysisInfo {
     }
 
     pub fn types_equal(&self, a: &crate::ast::Type, b: &crate::ast::Type) -> bool {
-        if matches!(a, crate::ast::Type::Any) || matches!(b, crate::ast::Type::Any) {
-            return true;
+        match (a, b) {
+            (crate::ast::Type::Any, _) | (_, crate::ast::Type::Any) => true,
+            (crate::ast::Type::Generic(_), _) | (_, crate::ast::Type::Generic(_)) => true,
+            (crate::ast::Type::Ref(a_inner, a_mut), crate::ast::Type::Ref(b_inner, b_mut)) => {
+                *a_mut == *b_mut && self.types_equal(a_inner, b_inner)
+            }
+            (crate::ast::Type::BoxPtr(a_inner), crate::ast::Type::BoxPtr(b_inner)) => {
+                self.types_equal(a_inner, b_inner)
+            }
+            (crate::ast::Type::Custom(a_name, a_gens), crate::ast::Type::Custom(b_name, b_gens)) => {
+                if a_name != b_name {
+                    return false;
+                }
+                if a_gens.len() != b_gens.len() {
+                    return false;
+                }
+                for (ag, bg) in a_gens.iter().zip(b_gens.iter()) {
+                    if !self.types_equal(ag, bg) {
+                        return false;
+                    }
+                }
+                true
+            }
+            _ => a == b,
         }
-        // Basic equality for now
-        a == b
     }
 
     pub fn deref_type(&self, ty: &crate::ast::Type) -> crate::ast::Type {
