@@ -164,8 +164,7 @@ pub fn compile_expr(expr: &Expr, target_obj: Option<&String>, is_mut: bool) -> T
                         .cloned()
                         .unwrap_or(ArgKind::Value);
                     if is_phantom && matches!(kind, ArgKind::Value) {
-                        let e = compile_expr(a, target_obj, false);
-                        return quote!((&#e).as_val());
+                        return wrap_expr_for_ref(a, Some(&Type::Any), target_obj, false);
                     }
                     let expected = param_types.as_ref().and_then(|pts| pts.get(i));
                     match kind {
@@ -231,8 +230,7 @@ pub fn compile_expr(expr: &Expr, target_obj: Option<&String>, is_mut: bool) -> T
                         .cloned()
                         .unwrap_or(ArgKind::Value);
                     if is_phantom && matches!(kind, ArgKind::Value) {
-                        let e = compile_expr(a, target_obj, false);
-                        return quote!((&#e).as_val());
+                        return wrap_expr_for_ref(a, Some(&Type::Any), target_obj, false);
                     }
                     let expected = param_types.as_ref().and_then(|pts| pts.get(i));
                     match kind {

@@ -1,5 +1,5 @@
 fn typef<T>(v: T):
-  println!(tyepof!(v))
+  println!(typeof!(v))
 
 fn takes_str(s: str):
 	return ()
@@ -11,7 +11,7 @@ fn main():
     // string::new() creates a heap-allocated 'string' (String in Rust)
     var mut dynamic_s = string::new()
     dynamic_s.append(" world")
-    tyepf(dynamic_s)
+    typef(dynamic_s)
     println!(dynamic_s.len())
 
     // REDUCED CEREMONY:
@@ -22,7 +22,7 @@ fn main():
     // str!() macro
     var owned = str!("I am owned") // defaults to String
     var literal: str = "I am a literal"
-    tyepf(literal)
+    typef(literal)
     
     println!(owned)
     println!(literal)

@@ -2,13 +2,33 @@ use std::collections::HashMap;
 use proc_macro2::TokenStream;
 use quote::quote;
 
-use crate::{ast::{Decl, Type}, compiler::{compile_generics, compile_id, compile_type, functions::compile_function}};
+use crate::{ast::{Decl, Type}, compiler::{compile_generics, compile_id, compile_type, functions::compile_function, expressions::compile_expr}};
 
 pub fn compile_decls(decls: &[Decl], tokens: &mut TokenStream) {
     for decl in decls {
         match decl {
             Decl::Function(func) => {
                 tokens.extend(compile_function(func, None, false));
+            }
+            Decl::Const(c) => {
+                let name = quote::format_ident!("{}", c.name);
+                let ty = if let Some(t) = &c.ty {
+                    if matches!(t, Type::Str) {
+                        quote!(&'static str)
+                    } else {
+                        compile_type(t)
+                    }
+                } else if let Some(t) = &c.value.ty {
+                    if matches!(t, Type::Str) {
+                        quote!(&'static str)
+                    } else {
+                        compile_type(t)
+                    }
+                } else {
+                    quote!(_)
+                };
+                let val = compile_expr(&c.value, None, false);
+                tokens.extend(quote! { pub const #name: #ty = #val; });
             }
             Decl::Trait(tr) => {
                 let name = quote::format_ident!("{}", tr.name);

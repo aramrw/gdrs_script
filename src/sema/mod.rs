@@ -7,6 +7,7 @@ mod analysis; // This imports the analysis module, which will handle its own sub
 pub use types::TypeInfo;
 pub use analysis::AnalysisInfo;
 use analysis::statements::StatementAnalyzer;
+use analysis::expressions::ExpressionAnalyzer;
 
 use crate::ast::*;
 use crate::error::CompilerError;
@@ -104,6 +105,22 @@ impl SemanticAnalyzer {
                         let mut stmt_analyzer = StatementAnalyzer::new(&mut self.analysis_info, &mut self.type_info);
                         stmt_analyzer.analyze_stmt(&mut func.body)?;
                     }
+                }
+                Decl::Const(c) => {
+                    let mut expr_analyzer = ExpressionAnalyzer::new(&mut self.analysis_info, &mut self.type_info);
+                    let val_ty = expr_analyzer.analyze_expr(&mut c.value)?;
+                    let expected_ty = c.ty.as_ref().map(|t| self.type_info.resolve_type(t, prefix));
+                    if let Some(et) = expected_ty {
+                        if !self.analysis_info.types_equal(&et, &val_ty) {
+                            return Err(CompilerError::from_rich(chumsky::prelude::Rich::custom(
+                                c.span,
+                                format!("Type mismatch in constant '{}': expected {:?}, found {:?}", c.name, et, val_ty)
+                            )));
+                        }
+                    }
+                    // Update type in constants map if it was Any
+                    let full_name = if prefix.is_empty() { c.name.clone() } else { format!("{}::{}", prefix, c.name) };
+                    self.type_info.constants.insert(full_name, val_ty);
                 }
                 Decl::Module(name, inner) => {
                     let new_prefix = if prefix.is_empty() {

@@ -1,7 +1,7 @@
 rust dependency macroquad = "0.4"
 
-use crate::macroquad::prelude::*;
-use crate::macroquad::math::Vec2
+use rust::macroquad::prelude::*;
+use rust::macroquad::math::Vec2
 use std::math
 
 obj Triangle:

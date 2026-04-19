@@ -514,7 +514,7 @@ pub fn lex(source: &str) -> Result<Vec<(Token, Span)>, LexError> {
                         "f32" => tokens.push((Token::F32, span)),
                         "f64" => tokens.push((Token::F64, span)),
                         "bool" => tokens.push((Token::Bool, span)),
-                        "str" | "string" => tokens.push((Token::Str, span)),
+                        "str" => tokens.push((Token::Str, span)),
                         "true" => tokens.push((Token::Boolean(true), span)),
                         "false" => tokens.push((Token::Boolean(false), span)),
                         _ => tokens.push((Token::Ident(s), span)),

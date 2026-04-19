@@ -175,51 +175,45 @@ where
         .map(|e| ExprKind::Negate(Box::new(e)))
         .into_expr();
 
-    let macro_name = choice((ident(), just(Token::Str).to("str".to_string())));
+    let call_path = identifier_path.clone().or(just(Token::Str).to(vec![PathPart { name: "str".into(), generics: vec![] }]));
 
-    let call_path = identifier_path.clone().or(macro_name.map(|n| {
-        vec![PathPart {
-            name: n,
-            generics: Vec::new(),
-        }]
-    }));
-
-    let macro_call = call_path
+    let namespaced_call = call_path
         .clone()
-        .then_ignore(just(Token::Bang))
         .then(choice((
+            just(Token::Bang)
+                .ignore_then(choice((
+                    expr.clone()
+                        .separated_by(just(Token::Comma))
+                        .allow_trailing()
+                        .collect::<Vec<_>>()
+                        .parens(),
+                    expr.clone()
+                        .separated_by(just(Token::Comma))
+                        .allow_trailing()
+                        .collect::<Vec<_>>()
+                        .brackets(),
+                )))
+                .map(|args| (true, args)),
             expr.clone()
                 .separated_by(just(Token::Comma))
                 .allow_trailing()
                 .collect::<Vec<_>>()
-                .parens(),
-            expr.clone()
-                .separated_by(just(Token::Comma))
-                .allow_trailing()
-                .collect::<Vec<_>>()
-                .brackets(),
+                .parens()
+                .map(|args| (false, args)),
         )))
-        .map(|(path, args)| {
-            let full_name = path
-                .into_iter()
-                .map(|p| p.name)
-                .collect::<Vec<_>>()
-                .join("::");
-            ExprKind::MacroCall(full_name, args)
-        });
-
-    let normal_call = call_path
-        .clone()
-        .then(
-            expr.clone()
-                .separated_by(just(Token::Comma))
-                .allow_trailing()
-                .collect::<Vec<_>>()
-                .parens(),
-        )
-        .map(|(path, args)| ExprKind::Call(path, args, None, None, None));
-
-    let namespaced_call = choice((macro_call, normal_call)).into_expr();
+        .map(|(path, (is_macro, args))| {
+            if is_macro {
+                let full_name = path
+                    .into_iter()
+                    .map(|p| p.name)
+                    .collect::<Vec<_>>()
+                    .join("::");
+                ExprKind::MacroCall(full_name, args)
+            } else {
+                ExprKind::Call(path, args, None, None, None)
+            }
+        })
+        .into_expr();
 
     let term = choice((
         struct_literal,

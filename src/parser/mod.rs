@@ -1,6 +1,6 @@
 mod expr;
-mod types;
 mod stmt;
+mod types;
 
 use crate::ast::*;
 use crate::lexer::{Span, Token};
@@ -9,7 +9,6 @@ use crate::parser::stmt::stmt_parser;
 use crate::parser::types::type_parser;
 use chumsky::input::ValueInput;
 use chumsky::prelude::*;
-
 
 pub type ParserExtra<'a> = extra::Err<Rich<'a, Token, Span>>;
 
@@ -50,7 +49,8 @@ where
             kind,
             span: e.span(),
             ty: None,
-        }).boxed()
+        })
+        .boxed()
     }
 }
 impl<'a, I, T> ExprParserExt<'a, I> for T
@@ -69,7 +69,8 @@ where
         self.map_with(|kind, e| Stmt {
             kind,
             span: e.span(),
-        }).boxed()
+        })
+        .boxed()
     }
 }
 impl<'a, I, T> StmtParserExt<'a, I> for T
@@ -135,6 +136,7 @@ where
         .delimited_by(just(Token::Lt), just(Token::Gt))
 }
 
+/// parses attributes
 fn attribute_parser<'a, I>() -> impl Parser<'a, I, Vec<String>, ParserExtra<'a>> + Clone
 where
     I: ValueInput<'a, Token = Token, Span = Span>,
@@ -154,9 +156,6 @@ where
 // =========================================================================
 // Types, Expressions, and Statements
 // =========================================================================
-
-
-
 
 fn block_parser<'a, I>(
     stmt: impl Parser<'a, I, Stmt, ParserExtra<'a>> + Clone + 'a,
@@ -300,6 +299,22 @@ where
                 span: e.span(),
             },
         })
+}
+
+fn const_parser<'a, I>(
+    stmt: impl Parser<'a, I, Stmt, ParserExtra<'a>> + Clone + 'a,
+) -> impl Parser<'a, I, ConstDecl, ParserExtra<'a>> + Clone + 'a
+where
+    I: ValueInput<'a, Token = Token, Span = Span>,
+{
+    let expr = recursive(|expr| expr_parser(stmt.clone(), expr.clone()));
+
+    just(Token::Const)
+        .ignore_then(ident())
+        .then(just(Token::Colon).ignore_then(type_parser()).or_not())
+        .then_ignore(just(Token::Eq))
+        .then(expr)
+        .map_with(|((name, ty), value), e| ConstDecl { name, ty, value, span: e.span() })
 }
 
 fn obj_parser<'a, I>() -> impl Parser<'a, I, ObjectDecl, ParserExtra<'a>> + Clone
@@ -605,27 +620,25 @@ where
                 )
                 .then_ignore(just(Token::Dedent)),
         )
-        .map(
-            |(((_impl_gens, target), _target_gens), members)| {
-                let mut associated_types = Vec::new();
-                let mut functions = Vec::new();
-                for (at, f) in members {
-                    if let Some(a) = at {
-                        associated_types.push(a);
-                    }
-                    if let Some(func) = f {
-                        functions.push(func);
-                    }
+        .map(|(((_impl_gens, target), _target_gens), members)| {
+            let mut associated_types = Vec::new();
+            let mut functions = Vec::new();
+            for (at, f) in members {
+                if let Some(a) = at {
+                    associated_types.push(a);
                 }
-                ImplDecl {
-                    trait_name: None,
-                    target,
-                    generics: _impl_gens,
-                    associated_types,
-                    functions,
+                if let Some(func) = f {
+                    functions.push(func);
                 }
-            },
-        )
+            }
+            ImplDecl {
+                trait_name: None,
+                target,
+                generics: _impl_gens,
+                associated_types,
+                functions,
+            }
+        })
 }
 
 fn use_parser<'a, I>() -> impl Parser<'a, I, Decl, ParserExtra<'a>> + Clone
@@ -732,12 +745,17 @@ where
             let expr = recursive(|expr| expr_parser(stmt.clone(), expr.clone()));
             stmt_parser(stmt, expr)
         });
-        let expr = recursive(|expr| expr_parser(stmt.clone(), expr.clone()));
+        // unused
+        //let expr = recursive(|expr| expr_parser(stmt.clone(), expr.clone()));
 
+        // declartions (obj, enum, trait, impl, extern, etc)
         let decl = choice((
             rust_dependency_parser(),
             rust_block_parser(),
             func_parser(stmt.clone()).map(Decl::Function),
+            const_parser(stmt.clone())
+                .map(Decl::Const)
+                .then_ignore(just(Token::Semicolon).or_not()),
             obj_parser()
                 .map(Decl::Object)
                 .then_ignore(just(Token::Semicolon).or_not()),

@@ -3,8 +3,8 @@ rust dependency "macroquad-particles" = { version = "0.1.0", features = ["nanose
 rust dependency nanoserde = "0.1"
 
 // Added math for rotation logic
-use crate::macroquad::prelude::*;
-use crate::macroquad::math::Vec2
+use rust::macroquad::prelude::*;
+use rust::macroquad::math::Vec2
 
 obj Triangle:
     a: Vec2

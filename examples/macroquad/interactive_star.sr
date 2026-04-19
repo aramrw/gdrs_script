@@ -3,7 +3,7 @@ rust dependency macroquad = "0.4"
 use rust::macroquad::prelude::*;
 use rust::std::vec::Vec;
 
-//const FONT_SIZE: f32 = 15.0
+const FONT_SIZE: f32 = 15.0
 
 fn rbutton(text: str):
      draw_text(text, 20.0, 40.0, FONT_SIZE, RED)

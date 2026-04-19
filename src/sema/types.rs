@@ -22,6 +22,7 @@ pub struct TypeInfo {
     pub objects: HashMap<String, (HashMap<String, Type>, Vec<(String, Vec<String>)>)>,
     pub enums: HashMap<String, (HashMap<String, Vec<Type>>, Vec<(String, Vec<String>)>)>,
     pub traits: HashMap<String, TraitInfo>,
+    pub constants: HashMap<String, Type>,
     pub generic_params: HashMap<String, Vec<String>>,
     pub aliases: HashMap<String, String>,
     pub phantom_types: HashSet<String>,
@@ -35,6 +36,7 @@ impl TypeInfo {
             objects: HashMap::new(),
             enums: HashMap::new(),
             traits: HashMap::new(),
+            constants: HashMap::new(),
             generic_params: HashMap::new(),
             aliases: HashMap::new(),
             phantom_types: HashSet::new(),
@@ -152,6 +154,13 @@ impl TypeInfo {
             (vec![(Type::Ref(Box::new(Type::F32), false), ArgKind::Ref)], Some(Type::F32)),
         );
 
+        type_info.functions.insert(
+            "str::append".to_string(),
+            (
+                vec![(Type::Ref(Box::new(Type::Str), true), ArgKind::MutRef), (Type::Str, ArgKind::Value)],
+                None,
+            ),
+        );
         type_info.functions.insert(
             "string::append".to_string(),
             (
@@ -375,6 +384,15 @@ impl TypeInfo {
                     self.functions.insert(final_name.clone(), (resolved_params, resolved_ret));
                     self.generic_params = old_gens;
                     //println!("DEBUG collect_decls added function: {}", final_name);
+                }
+                Decl::Const(c) => {
+                    let full_name = if prefix.is_empty() {
+                        c.name.clone()
+                    } else {
+                        format!("{}::{}", prefix, c.name)
+                    };
+                    let ty = c.ty.as_ref().map(|t| self.resolve_type(t, prefix)).unwrap_or(Type::Any);
+                    self.constants.insert(full_name, ty);
                 }
                 Decl::Module(name, inner) => {
                     let new_prefix = if prefix.is_empty() {

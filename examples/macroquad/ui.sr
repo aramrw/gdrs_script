@@ -1,0 +1,13 @@
+rust dependency macroquad = "0.4"
+
+use rust::macroquad::ui::{root_ui, UiContent};
+use rust::macroquad::prelude::*;
+use rust::std::prelude::*;
+
+#[macroquad::main("window")]
+async fn main():
+	loop:
+		var root = root_ui().label(None, "hello megaui");
+		if root_ui().button(None, "push me"):
+			println!("pushed");
+		next_frame().await

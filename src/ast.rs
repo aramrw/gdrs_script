@@ -256,12 +256,21 @@ pub struct UseDecl {
 }
 
 #[derive(Debug, Clone, PartialEq)]
+pub struct ConstDecl {
+    pub name: String,
+    pub ty: Option<Type>,
+    pub value: Expr,
+    pub span: Span,
+}
+
+#[derive(Debug, Clone, PartialEq)]
 pub enum Decl {
     Function(Function),
     Object(ObjectDecl),
     Enum(EnumDecl),
     Trait(TraitDecl),
     Impl(ImplDecl),
+    Const(ConstDecl),
     ExternFunction(Function),
     ExternObject(ObjectDecl),
     ExternEnum(EnumDecl),

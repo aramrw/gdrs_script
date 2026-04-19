@@ -58,6 +58,8 @@ impl<'a> ExpressionAnalyzer<'a> {
                         return Ok(Type::Managed(Box::new(ty.clone())));
                     }
                     Ok(ty.clone())
+                } else if let Some(ty) = self.type_info.constants.get(&name) {
+                    Ok(ty.clone())
                 } else {
                     // Try lookup in enums for variants without payload
                     if name.contains("::") {

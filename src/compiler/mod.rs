@@ -375,7 +375,15 @@ fn wrap_expr_for_ref(expr: &Expr, expected_ty: Option<&Type>, target_obj: Option
                         quote! { &#tokens }
                     }
                 } else {
-                    quote! { (&#tokens).as_val() }
+                    let ty = expr.ty.as_ref().unwrap_or(&Type::Any);
+                    match ty {
+                        Type::Str => quote! { (&#tokens).solar_to_str() },
+                        Type::Custom(n, _) if n.contains("Option") || n.contains("Result") => {
+                            quote! { (#tokens) }
+                        }
+                        Type::Result(_, _) => quote! { (#tokens) },
+                        _ => quote! { (&#tokens).as_val() }
+                    }
                 }
             }
         }
