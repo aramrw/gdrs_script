@@ -1,32 +1,27 @@
-use rust::std::vec::Vec;
-use rust::std::env::args;
-use rust::std::env::Args;
-use rust::std::path::PathBuf;
+rust dependency macroquad = "0.4.14"
 
-@derive(Debug, Default, Clone)
-obj ParsedArg:
-    buf: string
+use rust::macroquad::prelude::*;
 
-@derive(Debug, Default)
-obj Cli:
-    exe: PathBuf
-    pargs: Vec<ParsedArg>
+#[macroquad::main("Bouncing Ball")]
+async fn main():
+    let mut x = screen_width() / 2.0
+    let mut y = screen_height() / 2.0
+    let mut dx = 5.0
+    let mut dy = 5.0
+    let radius = 20.0
 
-fn main():
-  var mut args = args()
-  var mut cli = Cli::default()
-  var opt_arg = args.next()
-  if opt_arg.is_none():
-    cli.exe = PathBuf::from("")
-  else:
-    cli.exe = PathBuf::from(opt_arg.unwrap())
+    loop:
+        clear_background(DARKGRAY)
 
-  for arg in args:
-      var pa = ParsedArg { buf: arg.solar_to_string() }
-      // this compiles
-      cli.pargs.solar_push(&pa)
-      // this doesn't
-      //cli.pargs.push(&pa)
-  // even tho solar_push compiles, 
-	// it doesn't actually append to pargs
-  dbg!(cli)
+        x += dx
+        y += dy
+
+        if x <= radius || x >= screen_width() - radius:
+            dx *= -1.0
+        
+        if y <= radius || y >= screen_height() - radius:
+            dy *= -1.0
+
+        draw_circle(x, y, radius, RED)
+
+        next_frame().await

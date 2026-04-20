@@ -1,7 +1,11 @@
+rust dependency pprof2 = { version = "0.13.1", features = ["flamegraph"]}
+
 use rust::std::vec::Vec;
 use rust::std::env::args;
 use rust::std::path::PathBuf;
 use rust::std::option::Option;
+
+use rust::pprof2::ProfilerGuard;
 
 @derive(Debug, Default, Clone)
 obj ParsedArg:
@@ -27,7 +31,6 @@ impl Cli:
 
   fn has_arg(&self, expect: &str) -> bool:
     // pargs.get() expects an &i32 for indexing..?
-    // its fine for now, just strange
     var first_arg: Option<ParsedArg> = self.pargs.get(&0)
     if first_arg.is_none():
        return false
@@ -39,7 +42,11 @@ impl Cli:
        return false
 
 fn main():
+    var guard = ProfilerGuard::new(100).unwrap()
     var mut cli = Cli::default()
     cli.parse()
-
     dbg!(cli)
+    
+    var report = guard.report().build().unwrap()
+    var file = std::fs::File::create("flamegraph.svg")?;
+    report.flamegraph(file).unwrap()
