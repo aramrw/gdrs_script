@@ -400,6 +400,7 @@ fn wrap_expr_for_ref(expr: &Expr, expected_ty: Option<&Type>, target_obj: Option
                 match arg_kind {
                     ArgKind::Value => {
                         let ty = expr.ty.as_ref().unwrap_or(&Type::Any);
+                        let ct = compile_type_ext(ty, target_obj);
                         match ty {
                             Type::Str => {
                                 // If it's a Solar string literal and a Solar String type is expected (by value)
@@ -414,7 +415,7 @@ fn wrap_expr_for_ref(expr: &Expr, expected_ty: Option<&Type>, target_obj: Option
                                 quote! { (#tokens) }
                             }
                             Type::Result(_, _) => quote! { (#tokens) },
-                            _ if has_clone(ty, type_info) => quote! { (&#tokens).as_val() },
+                            _ if has_clone(ty, type_info) => quote! { <_ as crate::SolarAsVal<#ct>>::as_val(&#tokens) },
                             _ => quote! { (#tokens) }
                         }
                     }
@@ -553,8 +554,15 @@ panic = "abort"
     fs::write(format!("{}/src/main.rs", project_dir), tokens.to_string())
         .expect("Failed to write src/main.rs");
 
+    // Format the generated code for better error messages
+    Command::new("cargo")
+        .args(&["fmt"])
+        .current_dir(project_dir)
+        .status()
+        .ok();
+
     println!("+=[Cargo]");
-    let mut args = vec!["build", "--message-format=short"];
+    let mut args = vec!["build"];
     if has_macroquad {
         args.push("--features");
         args.push("macroquad");

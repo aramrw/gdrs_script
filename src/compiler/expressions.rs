@@ -42,18 +42,64 @@ pub fn compile_expr(expr: &Expr, target_obj: Option<&String>, is_mut: bool, type
             }
 
             match op {
-                BinaryOp::Add => quote! { ((&#l).as_val() + (&#r).as_val()) },
-                BinaryOp::Subtract => quote! { ((&#l).as_val() - (&#r).as_val()) },
-                BinaryOp::Multiply => quote! { ((&#l).as_val() * (&#r).as_val()) },
-                BinaryOp::Divide => quote! { ((&#l).as_val() / (&#r).as_val()) },
-                BinaryOp::GreaterThan => quote! { ((&#l).as_val() > (&#r).as_val()) },
-                BinaryOp::LessThan => quote! { ((&#l).as_val() < (&#r).as_val()) },
-                BinaryOp::GreaterThanOrEqual => quote! { ((&#l).as_val() >= (&#r).as_val()) },
-                BinaryOp::LessThanOrEqual => quote! { ((&#l).as_val() <= (&#r).as_val()) },
-                BinaryOp::Equal => quote! { ((&#l).as_val() == (&#r).as_val()) },
-                BinaryOp::Modulo => quote! { ((&#l).as_val() % (&#r).as_val()) },
-                BinaryOp::AddAssign => quote! { (#l += (#r).as_val()) },
-                BinaryOp::SubAssign => quote! { (#l -= (#r).as_val()) },
+                BinaryOp::Add => {
+                    let l_ct = compile_type_ext(l_ty.unwrap_or(&Type::Any), target_obj);
+                    let r_ct = compile_type_ext(r_ty.unwrap_or(&Type::Any), target_obj);
+                    quote! { (<_ as crate::SolarAsVal<#l_ct>>::as_val(&#l) + <_ as crate::SolarAsVal<#r_ct>>::as_val(&#r)) }
+                },
+                BinaryOp::Subtract => {
+                    let l_ct = compile_type_ext(l_ty.unwrap_or(&Type::Any), target_obj);
+                    let r_ct = compile_type_ext(r_ty.unwrap_or(&Type::Any), target_obj);
+                    quote! { (<_ as crate::SolarAsVal<#l_ct>>::as_val(&#l) - <_ as crate::SolarAsVal<#r_ct>>::as_val(&#r)) }
+                },
+                BinaryOp::Multiply => {
+                    let l_ct = compile_type_ext(l_ty.unwrap_or(&Type::Any), target_obj);
+                    let r_ct = compile_type_ext(r_ty.unwrap_or(&Type::Any), target_obj);
+                    quote! { (<_ as crate::SolarAsVal<#l_ct>>::as_val(&#l) * <_ as crate::SolarAsVal<#r_ct>>::as_val(&#r)) }
+                },
+                BinaryOp::Divide => {
+                    let l_ct = compile_type_ext(l_ty.unwrap_or(&Type::Any), target_obj);
+                    let r_ct = compile_type_ext(r_ty.unwrap_or(&Type::Any), target_obj);
+                    quote! { (<_ as crate::SolarAsVal<#l_ct>>::as_val(&#l) / <_ as crate::SolarAsVal<#r_ct>>::as_val(&#r)) }
+                },
+                BinaryOp::GreaterThan => {
+                    let l_ct = compile_type_ext(l_ty.unwrap_or(&Type::Any), target_obj);
+                    let r_ct = compile_type_ext(r_ty.unwrap_or(&Type::Any), target_obj);
+                    quote! { (<_ as crate::SolarAsVal<#l_ct>>::as_val(&#l) > <_ as crate::SolarAsVal<#r_ct>>::as_val(&#r)) }
+                },
+                BinaryOp::LessThan => {
+                    let l_ct = compile_type_ext(l_ty.unwrap_or(&Type::Any), target_obj);
+                    let r_ct = compile_type_ext(r_ty.unwrap_or(&Type::Any), target_obj);
+                    quote! { (<_ as crate::SolarAsVal<#l_ct>>::as_val(&#l) < <_ as crate::SolarAsVal<#r_ct>>::as_val(&#r)) }
+                },
+                BinaryOp::GreaterThanOrEqual => {
+                    let l_ct = compile_type_ext(l_ty.unwrap_or(&Type::Any), target_obj);
+                    let r_ct = compile_type_ext(r_ty.unwrap_or(&Type::Any), target_obj);
+                    quote! { (<_ as crate::SolarAsVal<#l_ct>>::as_val(&#l) >= <_ as crate::SolarAsVal<#r_ct>>::as_val(&#r)) }
+                },
+                BinaryOp::LessThanOrEqual => {
+                    let l_ct = compile_type_ext(l_ty.unwrap_or(&Type::Any), target_obj);
+                    let r_ct = compile_type_ext(r_ty.unwrap_or(&Type::Any), target_obj);
+                    quote! { (<_ as crate::SolarAsVal<#l_ct>>::as_val(&#l) <= <_ as crate::SolarAsVal<#r_ct>>::as_val(&#r)) }
+                },
+                BinaryOp::Equal => {
+                    let l_ct = compile_type_ext(l_ty.unwrap_or(&Type::Any), target_obj);
+                    let r_ct = compile_type_ext(r_ty.unwrap_or(&Type::Any), target_obj);
+                    quote! { (<_ as crate::SolarAsVal<#l_ct>>::as_val(&#l) == <_ as crate::SolarAsVal<#r_ct>>::as_val(&#r)) }
+                },
+                BinaryOp::Modulo => {
+                    let l_ct = compile_type_ext(l_ty.unwrap_or(&Type::Any), target_obj);
+                    let r_ct = compile_type_ext(r_ty.unwrap_or(&Type::Any), target_obj);
+                    quote! { (<_ as crate::SolarAsVal<#l_ct>>::as_val(&#l) % <_ as crate::SolarAsVal<#r_ct>>::as_val(&#r)) }
+                },
+                BinaryOp::AddAssign => {
+                    let r_ct = compile_type_ext(r_ty.unwrap_or(&Type::Any), target_obj);
+                    quote! { (#l += <_ as crate::SolarAsVal<#r_ct>>::as_val(&#r)) }
+                },
+                BinaryOp::SubAssign => {
+                    let r_ct = compile_type_ext(r_ty.unwrap_or(&Type::Any), target_obj);
+                    quote! { (#l -= <_ as crate::SolarAsVal<#r_ct>>::as_val(&#r)) }
+                },
             }
         }
         ExprKind::Tuple(items) => {

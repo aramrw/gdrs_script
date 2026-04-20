@@ -39,7 +39,7 @@ impl<'a> StatementAnalyzer<'a> {
                     .insert(name.clone(), (self.analysis_info.scope_depth, *is_mutable));
                 let val_ty = self.analyze_expr(value)?; // Use expression analyzer
                 let expected_ty = ty.as_ref().map(|t| self.type_info.resolve_type(t, &self.analysis_info.current_prefix));
-                if let Some(et) = expected_ty {
+                let final_ty = if let Some(et) = expected_ty {
                     if !self.analysis_info.types_equal(&et, &val_ty) {
                         self.analysis_info.semantic_error(
                             format!(
@@ -49,8 +49,11 @@ impl<'a> StatementAnalyzer<'a> {
                             span,
                         )?;
                     }
-                }
-                self.analysis_info.symbols.insert(name.clone(), (val_ty, false));
+                    et
+                } else {
+                    val_ty
+                };
+                self.analysis_info.symbols.insert(name.clone(), (final_ty, *is_mutable));
                 Ok(())
             }
             StmtKind::Assign { target, value } => {

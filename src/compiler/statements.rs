@@ -45,7 +45,8 @@ pub fn compile_stmt(
                     quote! { (#val_raw).clone() }
                 } else if let Some(ty) = final_ty {
                     if has_clone(ty, type_info) {
-                        quote! { (&#val_raw).as_val() }
+                        let ct = compile_type_ext(ty, target_obj);
+                        quote! { <_ as crate::SolarAsVal<#ct>>::as_val(&#val_raw) }
                     } else {
                         val_raw.clone()
                     }
@@ -81,7 +82,8 @@ pub fn compile_stmt(
             let v = compile_expr(value, target_obj, false, type_info);
             let val_src = if let Some(ty) = &value.ty {
                 if has_clone(ty, type_info) {
-                    quote! { (&#v).as_val() }
+                    let ct = compile_type_ext(ty, target_obj);
+                    quote! { <_ as crate::SolarAsVal<#ct>>::as_val(&#v) }
                 } else {
                     v
                 }
@@ -143,10 +145,12 @@ pub fn compile_stmt(
         StmtKind::Return(expr) => {
             if let Some(e) = expr {
                 let e_compiled = compile_expr(e, target_obj, false, type_info);
+                let ty = e.ty.as_ref().unwrap_or(&Type::Any);
+                let ct = compile_type_ext(ty, target_obj);
                 if let Some(Type::Result(_, _)) = expected_ret {
-                    quote! { return Ok((&#e_compiled).as_val()); }
+                    quote! { return Ok(<_ as crate::SolarAsVal<#ct>>::as_val(&#e_compiled)); }
                 } else {
-                    quote! { return (&#e_compiled).as_val(); }
+                    quote! { return <_ as crate::SolarAsVal<#ct>>::as_val(&#e_compiled); }
                 }
             } else {
                 if let Some(Type::Result(_, _)) = expected_ret {
