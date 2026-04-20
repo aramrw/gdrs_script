@@ -335,6 +335,38 @@ impl<'a> ExpressionAnalyzer<'a> {
                 }
 
                 if found_name_and_ret.is_none() {
+                    // Trust calls on objects with attributes (e.g., @derive)
+                    let mut obj_name = None;
+                    if name.contains("::") {
+                        let parts: Vec<_> = name.split("::").collect();
+                        obj_name = Some(parts[..parts.len() - 1].join("::"));
+                    } else if name_to_lookup.contains("::") {
+                        let parts: Vec<_> = name_to_lookup.split("::").collect();
+                        obj_name = Some(parts[..parts.len() - 1].join("::"));
+                    }
+
+                    if let Some(oname) = obj_name {
+                        let oname_with_gens = if oname.contains('<') {
+                            oname.clone()
+                        } else {
+                            format!("{}<>", oname)
+                        };
+                        if let Some((_, _, attrs)) = self
+                            .type_info
+                            .objects
+                            .get(&oname)
+                            .or(self.type_info.objects.get(&oname_with_gens))
+                        {
+                            if !attrs.is_empty() {
+                                for arg in args.iter_mut() {
+                                    self.analyze_expr(arg)?;
+                                }
+                                *resolved_name = Some(name.clone());
+                                return Ok(Type::Any);
+                            }
+                        }
+                    }
+
                     // Handle phantom types and functions
                     let is_phantom = path.iter().any(|p| self.type_info.is_phantom_type(&p.name));
                     if is_phantom || self.type_info.has_wildcard_phantom {
@@ -479,6 +511,15 @@ impl<'a> ExpressionAnalyzer<'a> {
                 } else if self.type_info.has_wildcard_phantom {
                     // Fallback to Any if not found but phantom mode is active
                     return Ok(Type::Any);
+                } else if let Some((_, _, attrs)) = self.type_info.objects.get(&obj_name) {
+                    if !attrs.is_empty() {
+                        // Trust that the derive macro generates this method
+                        return Ok(Type::Any);
+                    }
+                    return self.analysis_info.semantic_error(
+                        format!("No method '{}' found on type '{}'", name, obj_name),
+                        span,
+                    );
                 } else {
                     return self.analysis_info.semantic_error(
                         format!("No method '{}' found on type '{}'", name, obj_name),

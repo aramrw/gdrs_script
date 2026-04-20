@@ -23,6 +23,10 @@ fn main():
 
   for arg in args:
       var pa = ParsedArg { buf: arg.solar_to_string() }
+      // this compiles
       cli.pargs.solar_push(&pa)
-  
+      // this doesn't
+      //cli.pargs.push(&pa)
+  // even tho solar_push compiles, 
+	// it doesn't actually append to pargs
   dbg!(cli)
