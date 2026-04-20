@@ -1,12 +1,13 @@
 use proc_macro2::TokenStream;
 use quote::quote;
 
-use crate::{ast::{Function, Type}, compiler::{compile_generics, statements::compile_stmt, types::compile_type_ext}};
+use crate::{ast::{Function, Type}, compiler::{compile_generics, statements::compile_stmt, types::compile_type_ext}, sema::TypeInfo};
 
 pub fn compile_function(
     func: &Function,
     target_obj: Option<&String>,
     is_trait_impl: bool,
+    type_info: &TypeInfo,
 ) -> TokenStream {
     let name_to_use = &func.name;
     let name = quote::format_ident!("{}", name_to_use);
@@ -94,7 +95,7 @@ pub fn compile_function(
     let main_ret_ty = Type::Result(Box::new(Type::Unit), Box::new(Type::Error));
 
     let body = if func.name == "main" && !is_macroquad {
-        let b = compile_stmt(&func.body, true, target_obj, None);
+        let b = compile_stmt(&func.body, true, target_obj, None, type_info);
         quote! { { #b; Ok(()) } }
     } else {
         compile_stmt(
@@ -102,6 +103,7 @@ pub fn compile_function(
             true,
             target_obj,
             func.return_type.as_ref().or(Some(&unit_ty)),
+            type_info,
         )
     };
     let vis = if is_trait_impl { quote!() } else { quote!(pub) };

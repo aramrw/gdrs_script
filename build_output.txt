@@ -1,0 +1,20 @@
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.04s
+     Running `target/debug/lang main.sr`
++=[Cargo]
+   Compiling solar_out v0.1.0 (/Users/aramsamifanni/Programming/lang/solar_out)
+src/main.rs:1:18585: error[E0308]: mismatched types: expected `String`, found `&str`
+error: could not compile `solar_out` (bin "solar_out") due to 1 previous error
+Cargo compilation failed.
+compiled in 180ms
+Error: [31mnu::shell::external_command[0m
+
+  [31m×[0m External command failed
+    ╭─[[36;1;4m/Users/aramsamifanni/Programming/lang/build.nu:12:6[0m]
+ [2m11[0m │     # We use ^ to ensure we are calling an external command/file
+ [2m12[0m │     ^$"./($binary_name)"
+    · [35;1m     ─────────┬─────────[0m
+    ·               [35;1m╰── [35;1mCommand `./sr_main` not found[0m[0m
+ [2m13[0m │ 
+    ╰────
+[36m  help: [0m`./sr_main` is neither a Nushell built-in or a known external command
+

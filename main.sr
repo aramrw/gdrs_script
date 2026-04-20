@@ -1,8 +1,28 @@
 use rust::std::vec::Vec;
+use rust::std::env::args;
+use rust::std::env::Args;
+use rust::std::path::PathBuf;
+
+@derive(Debug, Default, Clone)
+obj ParsedArg:
+    buf: string
+
+@derive(Debug, Default)
+obj Cli:
+    exe: PathBuf
+    pargs: Vec<ParsedArg>
 
 fn main():
-    var mut x: Vec<&str> = Vec::new()
-    x.push("hello")
+  var mut args = args()
+  var mut cli = Cli::default()
+  var opt_arg = args.next()
+  if opt_arg.is_none():
+    cli.exe = PathBuf::from("")
+  else:
+    cli.exe = PathBuf::from(opt_arg.unwrap())
 
-    println!(typeof!(x))
-    println!(typeof!(x[0]))
+  for arg in args:
+      var pa = ParsedArg { buf: arg.solar_to_string() }
+      cli.pargs.solar_push(&pa)
+  
+  dbg!(cli)

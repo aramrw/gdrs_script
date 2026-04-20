@@ -4,11 +4,12 @@ use quote::quote;
 use crate::{
     ast::{ArgKind, BinaryOp, Expr, ExprKind, Type},
     compiler::{
-        compile_id, compile_id_expr, compile_id_ext, compile_path, path_to_string, types::compile_type_ext, wrap_expr_for_ref,
+        compile_id, compile_id_expr, compile_id_ext, compile_path, path_to_string, types::compile_type_ext, wrap_expr_for_ref, has_clone
     },
+    sema::TypeInfo
 };
 
-pub fn compile_expr(expr: &Expr, target_obj: Option<&String>, is_mut: bool) -> TokenStream {
+pub fn compile_expr(expr: &Expr, target_obj: Option<&String>, is_mut: bool, type_info: &TypeInfo) -> TokenStream {
     match &expr.kind {
         ExprKind::Unit => quote! { () },
         ExprKind::Int(v) => quote! { #v },
@@ -24,8 +25,8 @@ pub fn compile_expr(expr: &Expr, target_obj: Option<&String>, is_mut: bool) -> T
             compile_id_expr(&path[0].name)
         }
         ExprKind::Binary(lhs, op, rhs) => {
-            let l = compile_expr(lhs, target_obj, false);
-            let r = compile_expr(rhs, target_obj, false);
+            let l = compile_expr(lhs, target_obj, false, type_info);
+            let r = compile_expr(rhs, target_obj, false, type_info);
 
             let l_ty = lhs.ty.as_ref();
             let r_ty = rhs.ty.as_ref();
@@ -36,7 +37,7 @@ pub fn compile_expr(expr: &Expr, target_obj: Option<&String>, is_mut: bool) -> T
                 let r_is_str = r_ty.map_or(false, |t| matches!(t, Type::Str));
 
                 if l_is_str || r_is_str {
-                    return quote! { (#l).solar_add(&#r) };
+                    return quote! { format!("{}{}", #l, #r) };
                 }
             }
 
@@ -56,13 +57,18 @@ pub fn compile_expr(expr: &Expr, target_obj: Option<&String>, is_mut: bool) -> T
             }
         }
         ExprKind::Tuple(items) => {
-            let items = items.iter().map(|i| compile_expr(i, target_obj, false));
+            let items = items.iter().map(|i| compile_expr(i, target_obj, false, type_info));
             quote! { (#( #items ),*) }
         }
         ExprKind::Array(items) => {
             let items = items.iter().map(|i| {
-                let e = compile_expr(i, target_obj, false);
-                quote!((&#e).as_val())
+                let e = compile_expr(i, target_obj, false, type_info);
+                if let Some(ty) = &i.ty {
+                    if has_clone(ty, type_info) {
+                        return quote!((&#e).as_val());
+                    }
+                }
+                quote!(#e)
             });
             quote! { [#(#items),*] }
         }
@@ -72,7 +78,7 @@ pub fn compile_expr(expr: &Expr, target_obj: Option<&String>, is_mut: bool) -> T
             let stmts_compiled = stmts
                 .iter()
                 .enumerate()
-                .map(|(idx, s)| compile_stmt(s, idx == len - 1, target_obj, expr.ty.as_ref()));
+                .map(|(idx, s)| compile_stmt(s, idx == len - 1, target_obj, expr.ty.as_ref(), type_info));
             quote! { { #( #stmts_compiled )* } }
         }
         ExprKind::Call(path, args, resolved_name, arg_kinds, param_types) => {
@@ -99,15 +105,15 @@ pub fn compile_expr(expr: &Expr, target_obj: Option<&String>, is_mut: bool) -> T
                     compile_path(path, target_obj, true)
                 };
                 let args_compiled = args.iter().map(|a| {
-                    let e = compile_expr(a, target_obj, false);
+                    let e = compile_expr(a, target_obj, false, type_info);
                     quote!((&#e).as_val())
                 });
                 return quote! { #id(#( #args_compiled ),*) };
             }
 
             if name == "array_init" {
-                let element = compile_expr(&args[0], target_obj, false);
-                let size = compile_expr(&args[1], target_obj, false);
+                let element = compile_expr(&args[0], target_obj, false, type_info);
+                let size = compile_expr(&args[1], target_obj, false, type_info);
                 let ty = compile_type_ext(args[0].ty.as_ref().unwrap_or(&Type::I32), target_obj);
 
                 if let ExprKind::Int(v) = &args[1].kind {
@@ -163,22 +169,19 @@ pub fn compile_expr(expr: &Expr, target_obj: Option<&String>, is_mut: bool) -> T
                         .and_then(|ks| ks.get(i))
                         .cloned()
                         .unwrap_or(ArgKind::Value);
+                    let mutable_expr_for_wrap = matches!(kind, ArgKind::MutRef);
                     if is_phantom && matches!(kind, ArgKind::Value) {
-                        return wrap_expr_for_ref(a, Some(&Type::Any), target_obj, false);
+                        return wrap_expr_for_ref(a, Some(&Type::Any), target_obj, mutable_expr_for_wrap, kind, type_info);
                     }
                     let expected = param_types.as_ref().and_then(|pts| pts.get(i));
-                    match kind {
-                        ArgKind::Value => wrap_expr_for_ref(a, expected, target_obj, false),
-                        ArgKind::Ref => wrap_expr_for_ref(a, expected, target_obj, false),
-                        ArgKind::MutRef => wrap_expr_for_ref(a, expected, target_obj, true),
-                    }
+                    wrap_expr_for_ref(a, expected, target_obj, mutable_expr_for_wrap, kind, type_info)
                 })
                 .collect::<Vec<_>>();
             quote! { #id(#( #args_compiled ),*) }
         }
         ExprKind::MethodCall(lhs, name, args, resolved_obj_name, arg_kinds, param_types) => {
             let is_phantom = matches!(expr.ty, Some(Type::Any));
-            let l = compile_expr(lhs, target_obj, is_mut);
+            let l = compile_expr(lhs, target_obj, is_mut, type_info);
 
             if name == "add" || name == "offset" || name == "sub" {
                 if let Some(ty) = &lhs.ty {
@@ -186,7 +189,7 @@ pub fn compile_expr(expr: &Expr, target_obj: Option<&String>, is_mut: bool) -> T
                         let args_c = args
                             .iter()
                             .map(|a| {
-                                let e = compile_expr(a, target_obj, false);
+                                let e = compile_expr(a, target_obj, false, type_info);
                                 quote!(crate::SolarAsSize::as_size(&#e))
                             })
                             .collect::<Vec<_>>();
@@ -209,12 +212,14 @@ pub fn compile_expr(expr: &Expr, target_obj: Option<&String>, is_mut: bool) -> T
             let mut name_to_use = name.clone();
             if let Some(obj) = resolved_obj_name {
                 let obj_low = obj.to_lowercase();
-                if ["string", "str", "vector", "vec", "i32", "i64", "f32", "f64", "array"]
-                    .contains(&obj_low.as_str())
-                    || obj_low.contains("string")
-                    || obj_low.contains("str")
-                    || obj_low.contains("vector")
-                    || obj_low.contains("vec")
+                if !name.starts_with("solar_") && (
+                       ["string", "str", "vector", "vec", "i32", "i64", "f32", "f64", "array"]
+                       .contains(&obj_low.as_str())
+                       || obj_low.contains("string")
+                       || obj_low.contains("str")
+                       || obj_low.contains("vector")
+                       || obj_low.contains("vec")
+                   )
                 {
                     name_to_use = format!("solar_{}", name);
                 }
@@ -229,15 +234,12 @@ pub fn compile_expr(expr: &Expr, target_obj: Option<&String>, is_mut: bool) -> T
                         .and_then(|ks| ks.get(i))
                         .cloned()
                         .unwrap_or(ArgKind::Value);
+                    let mutable_expr_for_wrap = matches!(kind, ArgKind::MutRef);
                     if is_phantom && matches!(kind, ArgKind::Value) {
-                        return wrap_expr_for_ref(a, Some(&Type::Any), target_obj, false);
+                        return wrap_expr_for_ref(a, Some(&Type::Any), target_obj, mutable_expr_for_wrap, kind, type_info);
                     }
                     let expected = param_types.as_ref().and_then(|pts| pts.get(i));
-                    match kind {
-                        ArgKind::Value => wrap_expr_for_ref(a, expected, target_obj, false),
-                        ArgKind::Ref => wrap_expr_for_ref(a, expected, target_obj, false),
-                        ArgKind::MutRef => wrap_expr_for_ref(a, expected, target_obj, true),
-                    }
+                    wrap_expr_for_ref(a, expected, target_obj, mutable_expr_for_wrap, kind, type_info)
                 })
                 .collect::<Vec<_>>();
 
@@ -260,7 +262,7 @@ pub fn compile_expr(expr: &Expr, target_obj: Option<&String>, is_mut: bool) -> T
             quote! { (#l).#id_tokens(#( #args_c ),*) }
         }
         ExprKind::MemberAccess(lhs, name) => {
-            let l = compile_expr(lhs, target_obj, is_mut);
+            let l = compile_expr(lhs, target_obj, is_mut, type_info);
 
             if let Some(lhs_ty) = &lhs.ty {
                 if matches!(lhs_ty, Type::Tuple(_)) {
@@ -302,14 +304,18 @@ pub fn compile_expr(expr: &Expr, target_obj: Option<&String>, is_mut: bool) -> T
             }
         }
         ExprKind::IndexAccess(lhs, index) => {
-            let l = compile_expr(lhs, target_obj, is_mut);
-            let i = compile_expr(index, target_obj, false);
+            let l = compile_expr(lhs, target_obj, is_mut, type_info);
+            let i = compile_expr(index, target_obj, false, type_info);
             quote! { (#l)[crate::SolarAsSize::as_size(&(#i))] }
         }
         ExprKind::Cast(inner, ty) => {
-            let e = compile_expr(inner, target_obj, false);
+            let e = compile_expr(inner, target_obj, false, type_info);
             let t = compile_type_ext(ty, target_obj);
-            quote! { ((&#e).as_val() as #t) }
+            if has_clone(ty, type_info) {
+                quote! { ((&#e).as_val() as #t) }
+            } else {
+                quote! { (#e as #t) }
+            }
         }
         ExprKind::StructLiteral {
             path,
@@ -332,12 +338,18 @@ pub fn compile_expr(expr: &Expr, target_obj: Option<&String>, is_mut: bool) -> T
 
             let fields_tokens = fields.iter().map(|(fname, fval)| {
                 let id = quote::format_ident!("{}", fname);
-                let v = compile_expr(fval, target_obj, false);
+                let v = compile_expr(fval, target_obj, false, type_info);
+                let has_v_clone = if let Some(ty) = &fval.ty {
+                    has_clone(ty, type_info)
+                } else {
+                    false
+                };
                 match &fval.ty {
                     Some(Type::Ref(_, _)) | Some(Type::RawPtr(_, _)) | Some(Type::Managed(_)) |
                     Some(Type::ThreadSafe(_)) | Some(Type::BoxPtr(_)) | Some(Type::Array(_, _)) => 
                         quote! { #id: #v },
-                    _ => quote! { #id: (&#v).as_val() },
+                    _ if has_v_clone => quote! { #id: (&#v).as_val() },
+                    _ => quote! { #id: #v },
                 }
             });
 
@@ -358,7 +370,7 @@ pub fn compile_expr(expr: &Expr, target_obj: Option<&String>, is_mut: bool) -> T
         ExprKind::MacroCall(name, args) => {
             let name_id = quote::format_ident!("{}", name);
             if name == "typeof" {
-                let e = compile_expr(&args[0], target_obj, false);
+                let e = compile_expr(&args[0], target_obj, false, type_info);
                 return quote! { crate::SolarCow::Borrowed(crate::solar_typeof(&#e)) };
             }
 
@@ -368,7 +380,7 @@ pub fn compile_expr(expr: &Expr, target_obj: Option<&String>, is_mut: bool) -> T
                     quote! { #name_id!() }
                 } else if name == "dbg" {
                     let all_args = args.iter().map(|a| {
-                        let e = compile_expr(a, target_obj, false);
+                        let e = compile_expr(a, target_obj, false, type_info);
                         quote!(&#e)
                     });
                     return quote! { { dbg!(#( #all_args ),*); } };
@@ -384,7 +396,7 @@ pub fn compile_expr(expr: &Expr, target_obj: Option<&String>, is_mut: bool) -> T
                                 format_str.push_str(" {:?}");
                             }
                             let all_rest_args = args[1..].iter().map(|a| {
-                                let e = compile_expr(a, target_obj, false);
+                                let e = compile_expr(a, target_obj, false, type_info);
                                 quote!(&#e)
                             });
                             quote! { #name_id!(#format_str, #( #all_rest_args ),*) }
@@ -392,7 +404,7 @@ pub fn compile_expr(expr: &Expr, target_obj: Option<&String>, is_mut: bool) -> T
                             // If placeholders exist, replace them with {:?} to avoid Display errors
                             let format_str = s.replace("{}", "{:?}");
                             let rest_args = args.iter().skip(1).map(|a| {
-                                let e = compile_expr(a, target_obj, false);
+                                let e = compile_expr(a, target_obj, false, type_info);
                                 quote!(&#e)
                             });
                             quote! { #name_id!(#format_str, #( #rest_args ),*) }
@@ -400,7 +412,7 @@ pub fn compile_expr(expr: &Expr, target_obj: Option<&String>, is_mut: bool) -> T
                     } else {
                         let format_str = vec!["{:?}"; args.len()].join(" ");
                         let all_args = args.iter().map(|a| {
-                            let e = compile_expr(a, target_obj, false);
+                            let e = compile_expr(a, target_obj, false, type_info);
                             quote!(&#e)
                         });
                         quote! { #name_id!(#format_str, #( #all_args ),*) }
@@ -410,27 +422,27 @@ pub fn compile_expr(expr: &Expr, target_obj: Option<&String>, is_mut: bool) -> T
                 if args.is_empty() {
                     quote! { ::std::string::String::new() }
                 } else {
-                    let e = compile_expr(&args[0], target_obj, false);
+                    let e = compile_expr(&args[0], target_obj, false, type_info);
                     quote! { (&#e).as_val() }
                 }
             } else {
                 let args_compiled = args.iter().map(|a| {
-                    let e = compile_expr(a, target_obj, false);
+                    let e = compile_expr(a, target_obj, false, type_info);
                     quote!(&#e)
                 }).collect::<Vec<_>>();
                 quote! { #name_id!(#( #args_compiled ),*) }
             }
         }
         ExprKind::Borrow(inner, mutable) => {
-            let e = compile_expr(inner, target_obj, *mutable);
+            let e = compile_expr(inner, target_obj, *mutable, type_info);
             if *mutable { quote!(&mut #e) } else { quote!(&#e) }
         }
         ExprKind::Deref(inner) => {
-            let e = compile_expr(inner, target_obj, false);
+            let e = compile_expr(inner, target_obj, false, type_info);
             quote!(*#e)
         }
         ExprKind::Alloc(inner, kind) => {
-            let e = compile_expr(inner, target_obj, false);
+            let e = compile_expr(inner, target_obj, false, type_info);
             match kind {
                 crate::ast::AllocKind::Box => quote!(Box::new((#e).clone())),
                 crate::ast::AllocKind::Rc => quote!(::std::rc::Rc::new(::std::cell::RefCell::new((#e).clone()))),
@@ -439,7 +451,7 @@ pub fn compile_expr(expr: &Expr, target_obj: Option<&String>, is_mut: bool) -> T
             }
         }
         ExprKind::Downgrade(inner) => {
-            let e = compile_expr(inner, target_obj, false);
+            let e = compile_expr(inner, target_obj, false, type_info);
             if let Some(Type::ThreadSafe(_)) = &inner.ty {
                 quote!(::std::sync::Arc::downgrade(&#e))
             } else {
@@ -447,19 +459,19 @@ pub fn compile_expr(expr: &Expr, target_obj: Option<&String>, is_mut: bool) -> T
             }
         }
         ExprKind::Negate(inner) => {
-            let e = compile_expr(inner, target_obj, false);
+            let e = compile_expr(inner, target_obj, false, type_info);
             quote!(-#e)
         }
         ExprKind::Unwrap(inner) => {
-            let e = compile_expr(inner, target_obj, false);
+            let e = compile_expr(inner, target_obj, false, type_info);
             quote!(#e.unwrap())
         }
         ExprKind::Await(inner) => {
-            let e = compile_expr(inner, target_obj, false);
+            let e = compile_expr(inner, target_obj, false, type_info);
             quote! { #e.await }
         }
         ExprKind::Try(inner) => {
-            let e = compile_expr(inner, target_obj, false);
+            let e = compile_expr(inner, target_obj, false, type_info);
             quote! { #e? }
         }
         _ => quote!(()),

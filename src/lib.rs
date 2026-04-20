@@ -152,7 +152,7 @@ pub fn run_compiler(file_path: &str) -> Result<(), Box<dyn std::error::Error>> {
     }
 
     let output_name = format!("sr_{}", root_path.file_stem().unwrap().to_str().unwrap());
-    compile(program, &output_name);
+    compile(program, &output_name, &sema.type_info);
     println!("compiled in {}ms", instant.elapsed().as_millis());
     Ok(())
 }

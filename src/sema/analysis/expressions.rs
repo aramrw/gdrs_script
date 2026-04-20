@@ -70,7 +70,7 @@ impl<'a> ExpressionAnalyzer<'a> {
                             if !enum_name.contains('<') {
                                 enum_name = format!("{}<>", enum_name);
                             }
-                            if let Some((variants, generics)) = self.type_info.enums.get(&enum_name) {
+                            if let Some((variants, generics, _)) = self.type_info.enums.get(&enum_name) {
                                 if let Some(variant_params) = variants.get(variant[0]) {
                                     if variant_params.is_empty() {
                                         let mut resolved_generics = Vec::new();
@@ -299,7 +299,7 @@ impl<'a> ExpressionAnalyzer<'a> {
                             if !enum_name.contains('<') {
                                 enum_name = format!("{}<>", enum_name);
                             }
-                            if let Some((variants, generics)) = self.type_info.enums.get(&enum_name) {
+                            if let Some((variants, generics, _)) = self.type_info.enums.get(&enum_name) {
                                 if let Some(_variant_params) = variants.get(variant[0]) {
                                     // Found an enum variant!
                                     // For now, return the custom type.
@@ -321,7 +321,7 @@ impl<'a> ExpressionAnalyzer<'a> {
                             if !enum_name.contains('<') {
                                 enum_name = format!("{}<>", enum_name);
                             }
-                            if let Some((variants, generics)) = self.type_info.enums.get(&enum_name) {
+                            if let Some((variants, generics, _)) = self.type_info.enums.get(&enum_name) {
                                 if let Some(_variant_params) = variants.get(variant[0]) {
                                     let mut resolved_generics = Vec::new();
                                     for (gname, _) in generics {
@@ -576,7 +576,7 @@ impl<'a> ExpressionAnalyzer<'a> {
                                 return Ok(Type::Any);
                             }
                             // Lookup member in objects map from type_info
-                            if let Some((fields, _)) = self.type_info.objects.get(obj_name) {
+                            if let Some((fields, _, _)) = self.type_info.objects.get(obj_name) {
                                 if let Some(field_ty) = fields.get(name) {
                                     Ok(field_ty.clone())
                                 } else {

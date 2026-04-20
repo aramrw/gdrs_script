@@ -31,17 +31,17 @@ cargo build
 To compile a `.sr` file:
 ```bash
 cargo run -- <path_to_file.sr>
+# or better, has Awarnings on uses less tokens, direct rust errors
+nu ./build.nu <path_to_file.sr>
 ```
 Example:
 ```bash
-cargo run -- main.sr
+# this will run RUSTFLAGS="-Awarnings" cargo run -- $file
+nu ./build.nu main.sr
 ```
 
 ### Run the Compiled Program
-The compiler produces an executable named `sr_<filename>` (e.g., `sr_main` for `main.sr`) in the root directory:
-```bash
-./sr_main
-```
+the ./build.nu command auto run's it for you if it successfully build. this is our build system for now
 
 ## Development Conventions
 

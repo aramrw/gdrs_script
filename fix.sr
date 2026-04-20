@@ -1,0 +1,11 @@
+fn get_default_arg() -> string:
+    return ""
+
+fn main():
+  var args = args()
+  var mut cli = Cli { exe: PathBuf::new(), pargs: Vec::new() }
+  cli.exe = PathBuf::from(args.next().unwrap_or(get_default_arg()));
+
+  for arg in args:
+      var pa = ParsedArg { buf: arg.solar_to_string() }
+      cli.pargs.solar_push(&pa)

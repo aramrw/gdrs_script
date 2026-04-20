@@ -19,6 +19,7 @@ use crate::compiler::declarations::{collect_decl_metadata, compile_decls};
 use crate::compiler::expressions::compile_expr;
 use crate::compiler::statements::compile_stmt;
 use crate::compiler::types::compile_type_ext;
+use crate::sema::TypeInfo;
 
 lazy_static! {
     pub(crate) static ref RUST_MAPPINGS: Mutex<HashMap<String, String>> =
@@ -106,6 +107,32 @@ fn parse_single_generic(s: &str) -> TokenStream {
             let gid = quote::format_ident!("{}", s);
             quote!(#gid)
         })
+    }
+}
+
+pub fn has_clone(ty: &Type, type_info: &TypeInfo) -> bool {
+    match ty {
+        Type::I32 | Type::I64 | Type::F32 | Type::F64 | Type::Bool => true,
+        Type::Str => true,
+        Type::Custom(name, _) => {
+            if let Some((_, _, attrs)) = type_info.objects.get(name) {
+                attrs.iter().any(|a| a.contains("Clone"))
+            } else if let Some((_, _, attrs)) = type_info.enums.get(name) {
+                attrs.iter().any(|a| a.contains("Clone"))
+            } else {
+                // If we don't know, we assume it's NOT cloneable for safety,
+                // UNLESS it's a known cloneable type like Vec
+                if name.contains("Vector") || name.contains("Vec") {
+                    return true;
+                }
+                false
+            }
+        }
+        Type::Generic(_) => true, // Generics are required to be Clone in Solar
+        Type::Result(ok, err) => has_clone(ok, type_info) && has_clone(err, type_info),
+        Type::Tuple(types) => types.iter().all(|t| has_clone(t, type_info)),
+        Type::Array(inner, _) => has_clone(inner, type_info),
+        _ => false,
     }
 }
 
@@ -291,7 +318,7 @@ fn compile_type(ty: &Type) -> TokenStream {
     compile_type_ext(ty, None)
 }
 
-fn compile_pattern(pat: &Pattern) -> TokenStream {
+fn compile_pattern(pat: &Pattern, type_info: &TypeInfo) -> TokenStream {
     match pat {
         Pattern::Variant(enm, var, params) => {
             let vid = quote::format_ident!("{}", var);
@@ -315,12 +342,12 @@ fn compile_pattern(pat: &Pattern) -> TokenStream {
             let id = quote::format_ident!("{}", n);
             quote!(#id)
         }
-        Pattern::Literal(lit) => compile_expr(lit, None, false),
+        Pattern::Literal(lit) => compile_expr(lit, None, false, type_info),
     }
 }
 
-fn wrap_expr_for_ref(expr: &Expr, expected_ty: Option<&Type>, target_obj: Option<&String>, mutable: bool) -> TokenStream {
-    let tokens = compile_expr(expr, target_obj, mutable);
+fn wrap_expr_for_ref(expr: &Expr, expected_ty: Option<&Type>, target_obj: Option<&String>, mutable_expr: bool, arg_kind: ArgKind, type_info: &TypeInfo) -> TokenStream {
+    let tokens = compile_expr(expr, target_obj, mutable_expr, type_info); // Use mutable_expr here
 
     if let Some(ty) = &expr.ty {
         match ty {
@@ -331,67 +358,76 @@ fn wrap_expr_for_ref(expr: &Expr, expected_ty: Option<&Type>, target_obj: Option
                 if !is_ptr_expected {
                     match ty {
                         Type::Managed(_) => {
-                            if mutable {
+                            if arg_kind == ArgKind::MutRef { // Use arg_kind here
                                 quote! { &mut *#tokens.borrow_mut() }
                             } else {
                                 quote! { &*#tokens.borrow() }
                             }
                         }
                         Type::ThreadSafe(_) => {
-                            if mutable {
+                            if arg_kind == ArgKind::MutRef { // Use arg_kind here
                                 quote! { &mut *#tokens.write() }
                             } else {
                                 quote! { &*#tokens.read() }
                             }
                         }
                         Type::BoxPtr(_) => {
-                            if mutable {
+                            if arg_kind == ArgKind::MutRef { // Use arg_kind here
                                 quote! { &mut **#tokens }
                             } else {
                                 quote! { &**#tokens }
                             }
                         }
-                        _ => quote! { &#tokens }
+                        _ => { // For other pointer types or just to generate a reference to the content
+                            if arg_kind == ArgKind::MutRef {
+                                quote! { &mut #tokens }
+                            } else {
+                                quote! { &#tokens }
+                            }
+                        }
                     }
                 } else {
                     // Function explicitly expects the pointer type, so pass a reference to it.
-                    quote! { &#tokens }
-                }
-            }
-            Type::Ref(_, _) => tokens, // Already a ref
-            _ => {
-                // ALL Solar function parameters are passed by reference in the generated Rust.
-                let is_ref_expected = expected_ty.map_or(true, |et| {
-                    match et {
-                        Type::Ref(_, _) => true,
-                        Type::Any => false, // For phantom types, we might want as_val()
-                        _ => true,
-                    }
-                });
-                if is_ref_expected {
-                    if mutable {
+                    if arg_kind == ArgKind::MutRef { // Use arg_kind here
                         quote! { &mut #tokens }
                     } else {
                         quote! { &#tokens }
                     }
-                } else {
-                    let ty = expr.ty.as_ref().unwrap_or(&Type::Any);
-                    match ty {
-                        Type::Str => quote! { (&#tokens).solar_to_str() },
-                        Type::Custom(n, _) if n.contains("Option") || n.contains("Result") => {
-                            quote! { (#tokens) }
+                }
+            }
+            Type::Ref(_, _) => tokens, // Already a ref
+            _ => { // This is the case for non-pointer, non-reference types
+                match arg_kind {
+                    ArgKind::Value => {
+                        let ty = expr.ty.as_ref().unwrap_or(&Type::Any);
+                        match ty {
+                            Type::Str => {
+                                // If it's a Solar string literal and a Solar String type is expected (by value)
+                                if expected_ty.map_or(false, |et| matches!(et, Type::Str)) {
+                                    quote! { (&#tokens).solar_to_string() }
+                                } else {
+                                    // If a Str type is expected by value (e.g., &str), use solar_to_str
+                                    quote! { (&#tokens).solar_to_str() }
+                                }
+                            },
+                            Type::Custom(n, _) if n.contains("Option") || n.contains("Result") => {
+                                quote! { (#tokens) }
+                            }
+                            Type::Result(_, _) => quote! { (#tokens) },
+                            _ if has_clone(ty, type_info) => quote! { (&#tokens).as_val() },
+                            _ => quote! { (#tokens) }
                         }
-                        Type::Result(_, _) => quote! { (#tokens) },
-                        _ => quote! { (&#tokens).as_val() }
                     }
+                    ArgKind::Ref => quote! { &#tokens },
+                    ArgKind::MutRef => quote! { &mut #tokens },
                 }
             }
         }
-    } else {
-        if mutable {
-            quote! { &mut #tokens }
-        } else {
-            quote! { &#tokens }
+    } else { // If expr.ty is None, meaning the type is unknown
+        match arg_kind {
+            ArgKind::Value => quote! { (#tokens) }, // Pass by value
+            ArgKind::Ref => quote! { &#tokens },
+            ArgKind::MutRef => quote! { &mut #tokens },
         }
     }
 }
@@ -417,7 +453,7 @@ fn compile_generics(generics: &[(String, Vec<String>)]) -> TokenStream {
 
 
 
-pub fn compile(program: Program, output_name: &str) {
+pub fn compile(program: Program, output_name: &str, type_info: &TypeInfo) {
     let mut tokens = TokenStream::new();
     let mut dependencies = Vec::new();
     let mut use_tokio = false;
@@ -443,7 +479,7 @@ pub fn compile(program: Program, output_name: &str) {
     let has_macroquad = dependencies.iter().any(|(n, _)| n == "macroquad");
     tokens.extend(generate_solar_std(has_macroquad));
 
-    compile_decls(&program.declarations, &mut tokens);
+    compile_decls(&program.declarations, &mut tokens, type_info);
 
     fs::write("output.rs", tokens.to_string()).expect("Failed to write Rust code");
 

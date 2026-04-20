@@ -5,7 +5,7 @@ def main [file: string] {
     let binary_name = $"sr_($file | path parse | get stem)"
 
     # 1. Run the compiler
-    cargo run -- $file
+    RUSTFLAGS="-Awarnings" cargo run -- $file
 
     # 2. Run the generated binary
     # We use ^ to ensure we are calling an external command/file

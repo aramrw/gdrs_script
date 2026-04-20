@@ -2,13 +2,13 @@ use std::collections::HashMap;
 use proc_macro2::TokenStream;
 use quote::quote;
 
-use crate::{ast::{Decl, Type}, compiler::{compile_generics, compile_id, compile_type, functions::compile_function, expressions::compile_expr}};
+use crate::{ast::{Decl, Type}, compiler::{compile_generics, compile_id, compile_type, functions::compile_function, expressions::compile_expr}, sema::TypeInfo};
 
-pub fn compile_decls(decls: &[Decl], tokens: &mut TokenStream) {
+pub fn compile_decls(decls: &[Decl], tokens: &mut TokenStream, type_info: &TypeInfo) {
     for decl in decls {
         match decl {
             Decl::Function(func) => {
-                tokens.extend(compile_function(func, None, false));
+                tokens.extend(compile_function(func, None, false, type_info));
             }
             Decl::Const(c) => {
                 let name = quote::format_ident!("{}", c.name);
@@ -27,7 +27,7 @@ pub fn compile_decls(decls: &[Decl], tokens: &mut TokenStream) {
                 } else {
                     quote!(_)
                 };
-                let val = compile_expr(&c.value, None, false);
+                let val = compile_expr(&c.value, None, false, type_info);
                 tokens.extend(quote! { pub const #name: #ty = #val; });
             }
             Decl::Trait(tr) => {
@@ -85,7 +85,7 @@ pub fn compile_decls(decls: &[Decl], tokens: &mut TokenStream) {
                 let functions = imp
                     .functions
                     .iter()
-                    .map(|f| compile_function(f, Some(&full_target), is_trait_impl));
+                    .map(|f| compile_function(f, Some(&full_target), is_trait_impl, type_info));
 
                 let assoc_types = imp.associated_types.iter().map(|(name, ty)| {
                     let id = quote::format_ident!("{}", name);
@@ -149,11 +149,7 @@ pub fn compile_decls(decls: &[Decl], tokens: &mut TokenStream) {
                 let derive_error = if is_error {
                     quote!(#[derive(thiserror::Error, Debug, Clone)])
                 } else {
-                    if obj.generics.is_empty() {
-                        quote!(#[derive(Clone, Debug, Default)])
-                    } else {
-                        quote!(#[derive(Clone, Debug)])
-                    }
+                    quote!()
                 };
                 let gens_short = if obj.generics.is_empty() {
                     quote!()
@@ -164,15 +160,20 @@ pub fn compile_decls(decls: &[Decl], tokens: &mut TokenStream) {
                         .map(|(g, _)| quote::format_ident!("{}", g));
                     quote!(<#( #gids ),*>)
                 };
+                let has_clone = obj.attributes.iter().any(|a| a.contains("Clone"));
                 tokens.extend(quote! {
                     #( #attrs )* #derive_error pub struct #name #gens { #( #fields ),* }
-                    impl #gens crate::SolarAsVal<#name #gens_short> for #name #gens_short {
-                        fn as_val(&self) -> #name #gens_short { self.clone() }
-                    }
-                    impl #gens crate::SolarAsVal<#name #gens_short> for &#name #gens_short {
-                        fn as_val(&self) -> #name #gens_short { (*self).clone() }
-                    }
                 });
+                if has_clone {
+                    tokens.extend(quote! {
+                        impl #gens crate::SolarAsVal<#name #gens_short> for #name #gens_short {
+                            fn as_val(&self) -> #name #gens_short { self.clone() }
+                        }
+                        impl #gens crate::SolarAsVal<#name #gens_short> for &#name #gens_short {
+                            fn as_val(&self) -> #name #gens_short { (*self).clone() }
+                        }
+                    });
+                }
             }
             Decl::Enum(enm) => {
                 let name = quote::format_ident!("{}", enm.name);
@@ -216,7 +217,7 @@ pub fn compile_decls(decls: &[Decl], tokens: &mut TokenStream) {
                 let derive_error = if is_error {
                     quote!(#[derive(thiserror::Error, Debug, Clone)])
                 } else {
-                    quote!(#[derive(Clone, Debug)])
+                    quote!()
                 };
                 let gens_short = if enm.generics.is_empty() {
                     quote!()
@@ -227,15 +228,21 @@ pub fn compile_decls(decls: &[Decl], tokens: &mut TokenStream) {
                         .map(|(g, _)| quote::format_ident!("{}", g));
                     quote!(<#( #gids ),*>)
                 };
+                let has_clone = enm.attributes.iter().any(|a| a.contains("Clone"));
                 tokens.extend(quote! {
                     #( #attrs )* #derive_error pub enum #name #gens { #( #variants ),* }
-                    impl #gens crate::SolarAsVal<#name #gens_short> for #name #gens_short {
-                        fn as_val(&self) -> #name #gens_short { self.clone() }
-                    }
-                    impl #gens crate::SolarAsVal<#name #gens_short> for &#name #gens_short {
-                        fn as_val(&self) -> #name #gens_short { (*self).clone() }
-                    }
                 });
+
+                if has_clone {
+                    tokens.extend(quote! {
+                        impl #gens crate::SolarAsVal<#name #gens_short> for #name #gens_short {
+                            fn as_val(&self) -> #name #gens_short { self.clone() }
+                        }
+                        impl #gens crate::SolarAsVal<#name #gens_short> for &#name #gens_short {
+                            fn as_val(&self) -> #name #gens_short { (*self).clone() }
+                        }
+                    });
+                }
             }
             Decl::ExternFunction(_) => {}
             Decl::ExternObject(obj) => {
@@ -289,7 +296,7 @@ pub fn compile_decls(decls: &[Decl], tokens: &mut TokenStream) {
             }
             Decl::Module(name, inner) => {
                 let mut inner_tokens = TokenStream::new();
-                compile_decls(inner, &mut inner_tokens);
+                compile_decls(inner, &mut inner_tokens, type_info);
 
                 let mut mod_tokens = inner_tokens;
                 let mut parts: Vec<&str> = name.split("::").collect();
@@ -300,7 +307,7 @@ pub fn compile_decls(decls: &[Decl], tokens: &mut TokenStream) {
 
                 for part in parts.into_iter().rev() {
                     let id = quote::format_ident!("{}", part);
-                    mod_tokens = quote! { pub mod #id { use ::std as std; use crate::{SolarStr, SolarString, SolarVec, SolarIndex, SolarAdd, SolarInto, SolarI32, SolarI64, SolarF32, SolarF64, SolarAsArg, SolarAsVal, SolarAsSize, sr_math, sr_io, sr_fs}; #mod_tokens } };
+                    mod_tokens = quote! { pub mod #id { use ::std as std; use crate::{SolarStr, SolarVec, SolarIndex, SolarAdd, SolarInto, SolarI32, SolarI64, SolarF32, SolarF64, SolarAsArg, SolarAsVal, SolarAsSize, sr_math, sr_io, sr_fs}; #mod_tokens } };
                 }
                 tokens.extend(mod_tokens);
             }

@@ -1,0 +1,7 @@
+@derive(Debug, Default)
+obj Cli:
+    exe: string
+
+fn main():
+    var cli = Cli::default()
+    println!("Done")

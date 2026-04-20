@@ -19,8 +19,8 @@ pub struct TraitInfo {
 #[derive(Debug)]
 pub struct TypeInfo {
     pub functions: HashMap<String, (Vec<(Type, ArgKind)>, Option<Type>)>,
-    pub objects: HashMap<String, (HashMap<String, Type>, Vec<(String, Vec<String>)>)>,
-    pub enums: HashMap<String, (HashMap<String, Vec<Type>>, Vec<(String, Vec<String>)>)>,
+    pub objects: HashMap<String, (HashMap<String, Type>, Vec<(String, Vec<String>)>, Vec<String>)>,
+    pub enums: HashMap<String, (HashMap<String, Vec<Type>>, Vec<(String, Vec<String>)>, Vec<String>)>,
     pub traits: HashMap<String, TraitInfo>,
     pub constants: HashMap<String, Type>,
     pub generic_params: HashMap<String, Vec<String>>,
@@ -193,7 +193,7 @@ impl TypeInfo {
         let mut option_variants = HashMap::new();
         option_variants.insert("Some".to_string(), vec![Type::Generic("T".into())]);
         option_variants.insert("None".to_string(), vec![]);
-        type_info.enums.insert("option::Option<>".to_string(), (option_variants, vec![("T".into(), vec![])]));
+        type_info.enums.insert("option::Option<>".to_string(), (option_variants, vec![("T".into(), vec![])], vec!["derive(Clone, Debug, Default)".to_string()]));
         type_info.aliases.insert("Option".to_string(), "option::Option".to_string());
         type_info.aliases.insert("Vec".to_string(), "vec::Vector".to_string());
         type_info.aliases.insert("Vector".to_string(), "vec::Vector".to_string());
@@ -280,7 +280,7 @@ impl TypeInfo {
                         fields.insert(f.name.clone(), self.resolve_type(&f.ty, prefix));
                     }
                     self.objects
-                        .insert(full_name, (fields, obj.generics.clone()));
+                        .insert(full_name, (fields, obj.generics.clone(), obj.attributes.clone()));
                 }
                 Decl::Enum(enm) | Decl::ExternEnum(enm) => {
                     let mut full_name = if prefix.is_empty() {
@@ -300,7 +300,7 @@ impl TypeInfo {
                         variants.insert(v.name.clone(), v.types.clone());
                     }
                     self.enums
-                        .insert(full_name, (variants, enm.generics.clone()));
+                        .insert(full_name, (variants, enm.generics.clone(), enm.attributes.clone()));
                 }
                 Decl::Trait(tr) | Decl::ExternTrait(tr) => {
                     let mut full_name = if prefix.is_empty() {
@@ -534,6 +534,157 @@ impl TypeInfo {
             }
         }
         Ok(())
+    }
+
+    pub fn resolve_method_call_signature(
+        &mut self,
+        self_ty: &Type,
+        method_name: &str,
+        num_args: usize,
+        span: Span,
+    ) -> Result<(Option<Type>, Vec<Type>, Vec<ArgKind>), CompilerError> {
+        let (full_self_ty_name, self_generics) = match self_ty {
+            Type::Custom(name, generics) => (name.clone(), generics.clone()),
+            _ => {
+                return Err(CompilerError::from_rich(chumsky::prelude::Rich::custom(
+                    span,
+                    format!(
+                        "Method '{}' called on non-object type '{:?}'",
+                        method_name, self_ty
+                    ),
+                )));
+            }
+        };
+
+        // Try to find method directly on self_ty
+        let base_method_name = format!("{}::{}", full_self_ty_name, method_name);
+        if let Some((param_types_kinds, return_type)) = self.functions.get(&base_method_name) {
+            if param_types_kinds.len() != num_args {
+                return Err(CompilerError::from_rich(chumsky::prelude::Rich::custom(
+                    span,
+                    format!(
+                        "Method '{}' expects {} arguments, but received {}",
+                        base_method_name,
+                        param_types_kinds.len(),
+                        num_args
+                    ),
+                )));
+            }
+            let resolved_param_types: Vec<Type> = param_types_kinds.iter().map(|(ty, _)| ty.clone()).collect();
+            let resolved_arg_kinds: Vec<ArgKind> = param_types_kinds.iter().map(|(_, kind)| *kind).collect();
+            return Ok((return_type.clone(), resolved_param_types, resolved_arg_kinds));
+        }
+
+        // If not found, try to resolve methods for generic types (like Option<T> or Vec<T>)
+        let (base_type_name, type_params) = if full_self_ty_name.contains('<') {
+            let parts: Vec<&str> = full_self_ty_name.split('<').collect();
+            (parts[0].to_string(), self_generics)
+        } else {
+            (full_self_ty_name.clone(), Vec::new())
+        };
+
+        let generic_method_name = format!("{}<>::{}", base_type_name, method_name);
+        if let Some((param_types_kinds, return_type)) = self.functions.get(&generic_method_name) {
+            if param_types_kinds.len() != num_args {
+                return Err(CompilerError::from_rich(chumsky::prelude::Rich::custom(
+                    span,
+                    format!(
+                        "Method '{}' expects {} arguments, but received {}",
+                        generic_method_name,
+                        param_types_kinds.len(),
+                        num_args
+                    ),
+                )));
+            }
+
+            let mut resolved_param_types = Vec::with_capacity(param_types_kinds.len());
+            let mut resolved_arg_kinds = Vec::with_capacity(param_types_kinds.len());
+            let mut type_map = HashMap::new();
+
+            // Populate type_map for generic substitutions
+            if let Type::Custom(_, current_generics) = self_ty {
+                if let Some((_, generic_defs, _)) = self.objects.get(&base_type_name) {
+                    for (i, (gen_name, _)) in generic_defs.iter().enumerate() {
+                        if let Some(concrete_ty) = current_generics.get(i) {
+                            type_map.insert(gen_name.clone(), concrete_ty.clone());
+                        }
+                    }
+                } else if let Some((_, generic_defs, _)) = self.enums.get(&base_type_name) {
+                    for (i, (gen_name, _)) in generic_defs.iter().enumerate() {
+                        if let Some(concrete_ty) = current_generics.get(i) {
+                            type_map.insert(gen_name.clone(), concrete_ty.clone());
+                        }
+                    }
+                }
+            }
+
+
+            for (param_ty, arg_kind) in param_types_kinds {
+                let substituted_ty = self.substitute_generics(param_ty, &type_map);
+                resolved_param_types.push(substituted_ty);
+                resolved_arg_kinds.push(*arg_kind);
+            }
+
+            let substituted_return_type = return_type
+                .as_ref()
+                .map(|ty| self.substitute_generics(ty, &type_map));
+
+            return Ok((substituted_return_type, resolved_param_types, resolved_arg_kinds));
+        }
+
+        // Method not found
+        Err(CompilerError::from_rich(chumsky::prelude::Rich::custom(
+            span,
+            format!("Method '{}' not found for type '{:?}'", method_name, self_ty),
+        )))
+    }
+
+    fn substitute_generics(&self, ty: &Type, type_map: &HashMap<String, Type>) -> Type {
+        match ty {
+            Type::Generic(name) => type_map.get(name).cloned().unwrap_or_else(|| ty.clone()),
+            Type::Custom(name, generics) => {
+                let substituted_generics = generics
+                    .iter()
+                    .map(|g| self.substitute_generics(g, type_map))
+                    .collect();
+                Type::Custom(name.clone(), substituted_generics)
+            }
+            Type::Ref(inner, mutable) => {
+                Type::Ref(Box::new(self.substitute_generics(inner, type_map)), *mutable)
+            }
+            Type::BoxPtr(inner) => {
+                Type::BoxPtr(Box::new(self.substitute_generics(inner, type_map)))
+            }
+            Type::RawPtr(inner, mutable) => {
+                Type::RawPtr(Box::new(self.substitute_generics(inner, type_map)), *mutable)
+            }
+            Type::Managed(inner) => {
+                Type::Managed(Box::new(self.substitute_generics(inner, type_map)))
+            }
+            Type::ThreadSafe(inner) => {
+                Type::ThreadSafe(Box::new(self.substitute_generics(inner, type_map)))
+            }
+            Type::WeakManaged(inner) => {
+                Type::WeakManaged(Box::new(self.substitute_generics(inner, type_map)))
+            }
+            Type::WeakThreadSafe(inner) => {
+                Type::WeakThreadSafe(Box::new(self.substitute_generics(inner, type_map)))
+            }
+            Type::Result(ok, err) => Type::Result(
+                Box::new(self.substitute_generics(ok, type_map)),
+                Box::new(self.substitute_generics(err, type_map)),
+            ),
+            Type::Tuple(types) => Type::Tuple(
+                types
+                    .iter()
+                    .map(|t| self.substitute_generics(t, type_map))
+                    .collect(),
+            ),
+            Type::Array(inner, size) => {
+                Type::Array(Box::new(self.substitute_generics(inner, type_map)), *size)
+            }
+            _ => ty.clone(),
+        }
     }
 
     pub fn is_phantom_type(&self, name: &str) -> bool {

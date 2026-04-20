@@ -1,0 +1,7 @@
+@derive(Debug, Default)
+obj MyObj:
+    x: i32
+
+fn main():
+    var o = MyObj::default()
+    println!("Done")

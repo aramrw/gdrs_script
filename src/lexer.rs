@@ -339,6 +339,28 @@ pub fn lex(source: &str) -> Result<Vec<(Token, Span)>, LexError> {
                 '?' => tokens.push((Token::QuestionMark, span(1))),
                 '!' => tokens.push((Token::Bang, span(1))),
                 '~' => tokens.push((Token::Tilde, span(1))),
+                '@' => {
+                    let mut s = String::new();
+                    let start = current_pos;
+                    // Consume @
+                    // Now read until we hit a space or newline, but handle parentheses
+                    let mut paren_depth = 0;
+                    while let Some(&(_, nc)) = chars.peek() {
+                        if nc == '(' {
+                            paren_depth += 1;
+                        } else if nc == ')' {
+                            paren_depth -= 1;
+                        }
+
+                        if paren_depth == 0 && (nc.is_whitespace() || nc == '\n') {
+                            break;
+                        }
+                        s.push(chars.next().unwrap().1);
+                    }
+                    let end =
+                        trimmed_start_offset + chars.peek().map_or(trimmed.len(), |&(i, _)| i);
+                    tokens.push((Token::Attribute(s), SimpleSpan::from(start..end)));
+                }
                 '-' => {
                     if chars.peek().map(|&(_, c)| c) == Some('>') {
                         chars.next();

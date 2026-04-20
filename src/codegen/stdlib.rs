@@ -89,6 +89,8 @@ pub(crate) fn generate_solar_std(has_macroquad: bool) -> TokenStream {
         fn solar_len(&self) -> i32;
         fn solar_contains(&self, s: impl AsRef<str>) -> bool;
         fn solar_split(&self, s: impl AsRef<str>) -> Vec<String>;
+        fn solar_append(&mut self, s: impl AsRef<str>) { panic!("append not supported on this type"); }
+        fn solar_lines(&self) -> Vec<String>;
     }
 
     impl SolarStr for str {
@@ -98,38 +100,18 @@ pub(crate) fn generate_solar_std(has_macroquad: bool) -> TokenStream {
         fn solar_len(&self) -> i32 { self.len() as i32 }
         fn solar_contains(&self, s: impl AsRef<str>) -> bool { self.contains(s.as_ref()) }
         fn solar_split(&self, s: impl AsRef<str>) -> Vec<String> { self.split(s.as_ref()).map(|x| x.to_owned()).collect() }
-    }
-
-    pub trait SolarString {
-        fn solar_append(&mut self, s: impl AsRef<str>);
-        fn solar_len(&self) -> i32;
-        fn solar_contains(&self, s: impl AsRef<str>) -> bool;
-        fn solar_as_str(&self) -> &str;
-        fn solar_to_str(&self) -> &str;
-        fn solar_to_string(&self) -> String;
-        fn solar_lines(&self) -> Vec<String>;
-        fn solar_split(&self, s: impl AsRef<str>) -> Vec<String>;
-    }
-
-    impl SolarString for String {
-        fn solar_append(&mut self, s: impl AsRef<str>) { self.push_str(s.as_ref()); }
-        fn solar_len(&self) -> i32 { self.len() as i32 }
-        fn solar_contains(&self, s: impl AsRef<str>) -> bool { self.contains(s.as_ref()) }
-        fn solar_as_str(&self) -> &str { self.as_str() }
-        fn solar_to_str(&self) -> &str { self.as_str() }
-        fn solar_to_string(&self) -> String { self.clone() }
         fn solar_lines(&self) -> Vec<String> { self.lines().map(|x| x.to_owned()).collect() }
-        fn solar_split(&self, s: impl AsRef<str>) -> Vec<String> { self.split(s.as_ref()).map(|x| x.to_owned()).collect() }
     }
-    
-    // Explicitly add to_str wrapper
-    impl crate::SolarStr for String {
+
+    impl SolarStr for String {
         fn to_owned_string(&self) -> String { self.clone() }
         fn solar_to_string(&self) -> String { self.clone() }
         fn solar_to_str(&self) -> &str { self.as_str() }
         fn solar_len(&self) -> i32 { self.len() as i32 }
         fn solar_contains(&self, s: impl AsRef<str>) -> bool { self.contains(s.as_ref()) }
         fn solar_split(&self, s: impl AsRef<str>) -> Vec<String> { self.split(s.as_ref()).map(|x| x.to_owned()).collect() }
+        fn solar_append(&mut self, s: impl AsRef<str>) { self.push_str(s.as_ref()); }
+        fn solar_lines(&self) -> Vec<String> { self.lines().map(|x| x.to_owned()).collect() }
     }
 
     pub trait SolarVec<T> {
@@ -490,10 +472,6 @@ pub(crate) fn generate_solar_std(has_macroquad: bool) -> TokenStream {
 
     impl<'a> SolarAsSize for &'a i32 {
         fn as_size(&self) -> usize { **self as usize }
-    }
-
-    impl<'a, 'b> SolarAsSize for &'a &'b i32 {
-        fn as_size(&self) -> usize { ***self as usize }
     }
 
     pub mod mem {
