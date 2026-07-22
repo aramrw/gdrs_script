@@ -13,6 +13,7 @@ pub fn compile_type_ext(ty: &Type, target_obj: Option<&String>) -> TokenStream {
         Type::Bool => quote!(bool),
         Type::Str => quote!(::std::string::String),
         Type::File => quote!(::std::fs::File),
+        Type::Owned(inner) => compile_type_ext(inner, target_obj),
         Type::BoxPtr(inner) => {
             let t = compile_type_ext(inner, target_obj);
             quote!(Box<#t>)
@@ -83,10 +84,15 @@ pub fn compile_type_ext(ty: &Type, target_obj: Option<&String>) -> TokenStream {
                     let parts: Vec<_> = obj.split('<').collect();
                     let id = compile_id(parts[0]);
                     let gens_str = parts[1].trim_end_matches('>');
-                    let gens_tokens: Vec<_> = gens_str.split(',').map(|s| s.trim()).filter(|s| !s.is_empty()).map(|s| {
-                        let gid = quote::format_ident!("{}", s);
-                        quote!(#gid)
-                    }).collect();
+                    let gens_tokens: Vec<_> = gens_str
+                        .split(',')
+                        .map(|s| s.trim())
+                        .filter(|s| !s.is_empty())
+                        .map(|s| {
+                            let gid = quote::format_ident!("{}", s);
+                            quote!(#gid)
+                        })
+                        .collect();
                     quote!(#id<#( #gens_tokens ),*>)
                 } else {
                     let id = compile_id(obj);

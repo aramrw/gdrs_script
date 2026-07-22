@@ -10,6 +10,7 @@ pub enum Type {
     Bool,
     Str,
     File,
+    Owned(Box<Type>),
     Array(Box<Type>, usize),
     BoxPtr(Box<Type>),
     RawPtr(Box<Type>, bool),
@@ -194,6 +195,7 @@ pub struct Param {
     pub name: String,
     pub ty: Type,
     pub is_mutable: bool,
+    pub is_owned: bool,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -255,7 +257,7 @@ pub struct UseDecl {
     pub path: Vec<String>,
     pub items: Vec<String>,
     pub is_wildcard: bool,
-    pub is_rust: bool,    // If it starts with 'rust::'
+    pub is_rust: bool, // If it starts with 'rust::'
 }
 
 #[derive(Debug, Clone, PartialEq)]

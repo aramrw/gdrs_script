@@ -70,7 +70,9 @@ impl<'a> ExpressionAnalyzer<'a> {
                             if !enum_name.contains('<') {
                                 enum_name = format!("{}<>", enum_name);
                             }
-                            if let Some((variants, generics, _)) = self.type_info.enums.get(&enum_name) {
+                            if let Some((variants, generics, _)) =
+                                self.type_info.enums.get(&enum_name)
+                            {
                                 if let Some(variant_params) = variants.get(variant[0]) {
                                     if variant_params.is_empty() {
                                         let mut resolved_generics = Vec::new();
@@ -272,8 +274,10 @@ impl<'a> ExpressionAnalyzer<'a> {
                         if parts.len() >= 2 {
                             let (target, method) = parts.split_at(parts.len() - 1);
                             let alt_name = format!("{}<>::{}", target.join("::"), method[0]);
-                            if let Some((param_types, rt)) = self.type_info.functions.get(&alt_name) {
-                                found_name_and_ret = Some((alt_name, param_types.clone(), rt.clone()));
+                            if let Some((param_types, rt)) = self.type_info.functions.get(&alt_name)
+                            {
+                                found_name_and_ret =
+                                    Some((alt_name, param_types.clone(), rt.clone()));
                             }
                         }
                     }
@@ -282,8 +286,10 @@ impl<'a> ExpressionAnalyzer<'a> {
                         if parts.len() >= 2 {
                             let (target, method) = parts.split_at(parts.len() - 1);
                             let alt_name = format!("{}<>::{}", target.join("::"), method[0]);
-                            if let Some((param_types, rt)) = self.type_info.functions.get(&alt_name) {
-                                found_name_and_ret = Some((alt_name, param_types.clone(), rt.clone()));
+                            if let Some((param_types, rt)) = self.type_info.functions.get(&alt_name)
+                            {
+                                found_name_and_ret =
+                                    Some((alt_name, param_types.clone(), rt.clone()));
                             }
                         }
                     }
@@ -299,7 +305,9 @@ impl<'a> ExpressionAnalyzer<'a> {
                             if !enum_name.contains('<') {
                                 enum_name = format!("{}<>", enum_name);
                             }
-                            if let Some((variants, generics, _)) = self.type_info.enums.get(&enum_name) {
+                            if let Some((variants, generics, _)) =
+                                self.type_info.enums.get(&enum_name)
+                            {
                                 if let Some(_variant_params) = variants.get(variant[0]) {
                                     // Found an enum variant!
                                     // For now, return the custom type.
@@ -314,14 +322,16 @@ impl<'a> ExpressionAnalyzer<'a> {
                         }
                     }
                     if name.contains("::") {
-                         let parts: Vec<_> = name.split("::").collect();
+                        let parts: Vec<_> = name.split("::").collect();
                         if parts.len() >= 2 {
                             let (enum_parts, variant) = parts.split_at(parts.len() - 1);
                             let mut enum_name = enum_parts.join("::");
                             if !enum_name.contains('<') {
                                 enum_name = format!("{}<>", enum_name);
                             }
-                            if let Some((variants, generics, _)) = self.type_info.enums.get(&enum_name) {
+                            if let Some((variants, generics, _)) =
+                                self.type_info.enums.get(&enum_name)
+                            {
                                 if let Some(_variant_params) = variants.get(variant[0]) {
                                     let mut resolved_generics = Vec::new();
                                     for (gname, _) in generics {
@@ -385,10 +395,12 @@ impl<'a> ExpressionAnalyzer<'a> {
                 }
 
                 let (resolved_func_name, params, mut ret_type) = found_name_and_ret.unwrap();
-                
+
                 // Generic substitution: replace Generic("T") with Any for now
                 if let Some(Type::Custom(name, generics)) = &mut ret_type {
-                    if (name == "std::vec::Vector<>" || name == "std::option::Option<>") && generics.len() == 1 {
+                    if (name == "std::vec::Vector<>" || name == "std::option::Option<>")
+                        && generics.len() == 1
+                    {
                         if let Type::Generic(g) = &generics[0] {
                             if g == "T" {
                                 generics[0] = Type::Any;
@@ -396,10 +408,10 @@ impl<'a> ExpressionAnalyzer<'a> {
                         }
                     }
                 }
-                
+
                 // Ensure the expression itself has this type so compile_expr can see it
                 expr.ty = ret_type.clone();
-                
+
                 *resolved_name = Some(resolved_func_name.clone());
 
                 let p_types: Vec<Type> = params.iter().map(|(t, _)| t.clone()).collect();
@@ -424,10 +436,12 @@ impl<'a> ExpressionAnalyzer<'a> {
                 param_types_field,
             ) => {
                 let mut lhs_ty = self.analyze_expr(lhs)?;
-                // println!("DEBUG analyze MethodCall name={}, lhs_ty={:?}", name, lhs_ty);
-                let resolved_lhs_ty = self
+                let resolved_lhs = self
                     .type_info
                     .resolve_type(&lhs_ty, &self.analysis_info.current_prefix);
+                let actual_ty = self.analysis_info.deref_type(&resolved_lhs);
+
+                let resolved_lhs_ty = unwrap_type(&actual_ty).to_owned();
 
                 if resolved_lhs_ty == Type::Any {
                     for arg in args.iter_mut() {
@@ -455,7 +469,9 @@ impl<'a> ExpressionAnalyzer<'a> {
                 // Dereference to get the actual object type for method lookup
                 let actual_ty = self.analysis_info.deref_type(&resolved_lhs_ty);
 
-                let obj_name = match &actual_ty {
+                let unwrapped_ty = unwrap_type(&actual_ty).to_owned();
+
+                let obj_name = match &unwrapped_ty {
                     Type::Str => "str".to_string(),
                     Type::I32 => "i32".to_string(), // Primitive types may have methods
                     Type::I64 => "i64".to_string(),
@@ -660,7 +676,9 @@ impl<'a> ExpressionAnalyzer<'a> {
                         | Type::Array(inner, _) => {
                             Ok(*inner) // Return the inner type
                         }
-                        Type::Custom(name, generics) if name == "vec::Vector<>" && !generics.is_empty() => {
+                        Type::Custom(name, generics)
+                            if name == "vec::Vector<>" && !generics.is_empty() =>
+                        {
                             Ok(generics[0].clone())
                         }
                         _ => self.analysis_info.semantic_error(
@@ -807,5 +825,14 @@ impl<'a> ExpressionAnalyzer<'a> {
             _ => {} // Do nothing for other expression kinds
         }
         Ok(())
+    }
+}
+
+// Helper function to strip type wrappers in sema:
+fn unwrap_type(ty: &Type) -> &Type {
+    match ty {
+        Type::Owned(inner) => unwrap_type(inner),
+        Type::Ref(inner, _) => unwrap_type(inner),
+        _ => ty,
     }
 }

@@ -297,18 +297,30 @@ pub fn compile_expr(
 
             let mut name_to_use = name.clone();
             if let Some(obj) = resolved_obj_name {
-                let obj_low = obj.to_lowercase();
-                if !name.starts_with("solar_")
-                    && ([
-                        "string", "str", "vector", "vec", "i32", "i64", "f32", "f64", "array",
-                    ]
-                    .contains(&obj_low.as_str())
-                        || obj_low.contains("string")
-                        || obj_low.contains("str")
-                        || obj_low.contains("vector")
-                        || obj_low.contains("vec"))
-                {
-                    name_to_use = format!("solar_{}", name);
+                let mut name_to_use = name.clone();
+                if let Some(obj) = resolved_obj_name {
+                    let obj_low = obj.to_lowercase();
+
+                    // Check for exact built-in / standard library types ONLY
+                    let is_builtin = matches!(
+                        obj_low.as_str(),
+                        "string"
+                            | "str"
+                            | "vector"
+                            | "vec"
+                            | "i32"
+                            | "i64"
+                            | "f32"
+                            | "f64"
+                            | "array"
+                            | "std::string::string"
+                            | "std::vec::vector"
+                            | "std::vec::vec"
+                    );
+
+                    if !name.starts_with("solar_") && is_builtin {
+                        name_to_use = format!("solar_{}", name);
+                    }
                 }
             }
 
@@ -478,11 +490,7 @@ pub fn compile_expr(
                 return quote! { crate::SolarCow::Borrowed(crate::solar_typeof(&#e)) };
             }
 
-            if name == "println"
-                || name == "log"
-                || name == "logln"
-                || name == "dbg"
-            {
+            if name == "println" || name == "log" || name == "logln" || name == "dbg" {
                 if args.is_empty() {
                     quote! { #name_id!() }
                 } else if name == "dbg" {

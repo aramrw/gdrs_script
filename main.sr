@@ -9,24 +9,24 @@ fn vec2(x: f32, y: f32) -> Vec2:
 		Vec2 { x, y }
 
 impl Vec2:
-	fn self_pow2(self) -> Self:
-		var x2 = self.x *= self.x
-		var y2 = self.y *= self.x
-		var vec2 = Vec2 { x: x2, y: y2 }
+	fn square(&self) -> Vec2:
+		var vec2 = Vec2 { x: self.x * self.x, y: self.y * self.y }
 		vec2
-		
 
-//impl Sub for Vec2:
-	//type Output = Vec2;
-	//fn sub(self, other: Vec2):
-		//Vec2 { 
-				//x: self.x - other.x,
-				//y: self.y - other.y
-			//}
+
+impl Sub for Vec2:
+	type Output = Vec2;
+	fn sub(self, other: ^Vec2) -> Vec2:
+		Vec2 { 
+				x: self.x - other.x,
+				y: self.y - other.y
+			}
 
 fn main():
-	var v1 = vec2(20.0, 30.0)
-	var v2 = vec2(40.0, 20.0)
+	var v1 = vec2(10.0, 10.0)
+	var v2 = vec2(8.0, 8.0)
 
-	//var sum = v1 - v2
-	//dbg!(sum);
+	var sum = v1 - v2
+	dbg!(sum);
+	var squared = sum.square();
+	dbg!(squared);

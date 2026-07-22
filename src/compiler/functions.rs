@@ -73,9 +73,11 @@ pub fn compile_function(
                     Type::I32 | Type::I64 | Type::F32 | Type::F64 | Type::Bool
                 );
 
+                let is_owned = p.is_owned || matches!(p.ty, Type::Owned(_));
+
                 // ALL Solar function parameters are passed by reference in the generated Rust
                 // unless they are already references.
-                if is_primitive {
+                if is_owned || is_primitive {
                     if p.is_mutable {
                         quote!(mut #p_name: #p_ty)
                     } else {

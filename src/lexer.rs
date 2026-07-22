@@ -15,6 +15,7 @@ pub enum Token {
     Const,
     Trait,
     For,
+    Owned,
     Box,
     Rc,
     Arc,
@@ -190,6 +191,7 @@ impl Token {
             Token::Attribute(s) => format!("#[{}]", s),
             Token::Modulo => "%".into(),
             Token::Or => "||".into(),
+            Token::Owned => "^".into(),
         }
     }
 }
@@ -332,6 +334,7 @@ pub fn lex(source: &str) -> Result<Vec<(Token, Span)>, LexError> {
                         tokens.push((Token::Minus, span(1)));
                     }
                 }
+                '^' => tokens.push((Token::Owned, span(1))),
                 '&' => tokens.push((Token::Amp, span(1))),
                 '%' => tokens.push((Token::Modulo, span(1))),
                 '*' => {

@@ -189,6 +189,7 @@ where
 {
     let ty = type_parser::<I>();
     choice((
+        // references, &self or &mut self
         just(Token::Amp)
             .then(just(Token::Mut).or_not())
             .then(just(Token::SelfKw))
@@ -196,30 +197,53 @@ where
                 name: "self".to_string(),
                 ty: Type::Ref(Box::new(Type::SelfType), mut_kw.is_some()),
                 is_mutable: mut_kw.is_some(),
+                is_owned: false,
             }),
+        // owned values, ^Vec ^Vec2
+        just(Token::Owned)
+            .ignore_then(just(Token::Mut).or_not())
+            .then(ty.clone())
+            .map(|(mut_kw, t)| Param {
+                name: format!("__arg_{:?}", t), // or parsed ident name
+                ty: t,
+                is_mutable: mut_kw.is_some(),
+                is_owned: true,
+            }),
+        // Named params (including value `self` like `fn sub(self, ...)` or `mut self`)
         just(Token::Mut)
             .or_not()
             .then(ident().or(just(Token::SelfKw).to("self".to_string())))
             .then(just(Token::Colon).ignore_then(ty.clone()).or_not())
             .map(|((mut_kw, name), ty)| {
-                if let Some(t) = ty {
+                if name == "self" {
+                    Param {
+                        name: "self".to_string(),
+                        ty: ty.unwrap_or(Type::SelfType),
+                        is_mutable: mut_kw.is_some(),
+                        is_owned: false,
+                    }
+                } else if let Some(t) = ty {
                     Param {
                         name,
                         ty: t,
                         is_mutable: mut_kw.is_some(),
+                        is_owned: false,
                     }
                 } else {
                     Param {
                         name: format!("__arg_{}", name),
                         ty: Type::Custom(name, Vec::new()),
                         is_mutable: mut_kw.is_some(),
+                        is_owned: false,
                     }
                 }
             }),
+        // 3. Fallback for unnamed types
         ty.map(|t| Param {
             name: "_".to_string(),
             ty: t,
             is_mutable: false,
+            is_owned: false,
         }),
     ))
 }
@@ -314,7 +338,12 @@ where
         .then(just(Token::Colon).ignore_then(type_parser()).or_not())
         .then_ignore(just(Token::Eq))
         .then(expr)
-        .map_with(|((name, ty), value), e| ConstDecl { name, ty, value, span: e.span() })
+        .map_with(|((name, ty), value), e| ConstDecl {
+            name,
+            ty,
+            value,
+            span: e.span(),
+        })
 }
 
 fn obj_parser<'a, I>() -> impl Parser<'a, I, ObjectDecl, ParserExtra<'a>> + Clone
