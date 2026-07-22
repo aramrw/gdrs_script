@@ -4,12 +4,18 @@ use quote::quote;
 use crate::{
     ast::{ArgKind, BinaryOp, Expr, ExprKind, Type},
     compiler::{
-        compile_id, compile_id_expr, compile_id_ext, compile_path, path_to_string, types::compile_type_ext, wrap_expr_for_ref, has_clone
+        compile_id, compile_id_expr, compile_id_ext, compile_path, has_clone, path_to_string,
+        types::compile_type_ext, wrap_expr_for_ref,
     },
-    sema::TypeInfo
+    sema::TypeInfo,
 };
 
-pub fn compile_expr(expr: &Expr, target_obj: Option<&String>, is_mut: bool, type_info: &TypeInfo) -> TokenStream {
+pub fn compile_expr(
+    expr: &Expr,
+    target_obj: Option<&String>,
+    is_mut: bool,
+    type_info: &TypeInfo,
+) -> TokenStream {
     match &expr.kind {
         ExprKind::Unit => quote! { () },
         ExprKind::Int(v) => quote! { #v },
@@ -46,64 +52,78 @@ pub fn compile_expr(expr: &Expr, target_obj: Option<&String>, is_mut: bool, type
                     let l_ct = compile_type_ext(l_ty.unwrap_or(&Type::Any), target_obj);
                     let r_ct = compile_type_ext(r_ty.unwrap_or(&Type::Any), target_obj);
                     quote! { (<_ as crate::SolarAsVal<#l_ct>>::as_val(&#l) + <_ as crate::SolarAsVal<#r_ct>>::as_val(&#r)) }
-                },
+                }
                 BinaryOp::Subtract => {
                     let l_ct = compile_type_ext(l_ty.unwrap_or(&Type::Any), target_obj);
                     let r_ct = compile_type_ext(r_ty.unwrap_or(&Type::Any), target_obj);
                     quote! { (<_ as crate::SolarAsVal<#l_ct>>::as_val(&#l) - <_ as crate::SolarAsVal<#r_ct>>::as_val(&#r)) }
-                },
+                }
                 BinaryOp::Multiply => {
                     let l_ct = compile_type_ext(l_ty.unwrap_or(&Type::Any), target_obj);
                     let r_ct = compile_type_ext(r_ty.unwrap_or(&Type::Any), target_obj);
                     quote! { (<_ as crate::SolarAsVal<#l_ct>>::as_val(&#l) * <_ as crate::SolarAsVal<#r_ct>>::as_val(&#r)) }
-                },
+                }
                 BinaryOp::Divide => {
                     let l_ct = compile_type_ext(l_ty.unwrap_or(&Type::Any), target_obj);
                     let r_ct = compile_type_ext(r_ty.unwrap_or(&Type::Any), target_obj);
                     quote! { (<_ as crate::SolarAsVal<#l_ct>>::as_val(&#l) / <_ as crate::SolarAsVal<#r_ct>>::as_val(&#r)) }
-                },
+                }
                 BinaryOp::GreaterThan => {
                     let l_ct = compile_type_ext(l_ty.unwrap_or(&Type::Any), target_obj);
                     let r_ct = compile_type_ext(r_ty.unwrap_or(&Type::Any), target_obj);
                     quote! { (<_ as crate::SolarAsVal<#l_ct>>::as_val(&#l) > <_ as crate::SolarAsVal<#r_ct>>::as_val(&#r)) }
-                },
+                }
                 BinaryOp::LessThan => {
                     let l_ct = compile_type_ext(l_ty.unwrap_or(&Type::Any), target_obj);
                     let r_ct = compile_type_ext(r_ty.unwrap_or(&Type::Any), target_obj);
                     quote! { (<_ as crate::SolarAsVal<#l_ct>>::as_val(&#l) < <_ as crate::SolarAsVal<#r_ct>>::as_val(&#r)) }
-                },
+                }
                 BinaryOp::GreaterThanOrEqual => {
                     let l_ct = compile_type_ext(l_ty.unwrap_or(&Type::Any), target_obj);
                     let r_ct = compile_type_ext(r_ty.unwrap_or(&Type::Any), target_obj);
                     quote! { (<_ as crate::SolarAsVal<#l_ct>>::as_val(&#l) >= <_ as crate::SolarAsVal<#r_ct>>::as_val(&#r)) }
-                },
+                }
                 BinaryOp::LessThanOrEqual => {
                     let l_ct = compile_type_ext(l_ty.unwrap_or(&Type::Any), target_obj);
                     let r_ct = compile_type_ext(r_ty.unwrap_or(&Type::Any), target_obj);
                     quote! { (<_ as crate::SolarAsVal<#l_ct>>::as_val(&#l) <= <_ as crate::SolarAsVal<#r_ct>>::as_val(&#r)) }
-                },
+                }
                 BinaryOp::Equal => {
                     let l_ct = compile_type_ext(l_ty.unwrap_or(&Type::Any), target_obj);
                     let r_ct = compile_type_ext(r_ty.unwrap_or(&Type::Any), target_obj);
                     quote! { (<_ as crate::SolarAsVal<#l_ct>>::as_val(&#l) == <_ as crate::SolarAsVal<#r_ct>>::as_val(&#r)) }
-                },
+                }
                 BinaryOp::Modulo => {
                     let l_ct = compile_type_ext(l_ty.unwrap_or(&Type::Any), target_obj);
                     let r_ct = compile_type_ext(r_ty.unwrap_or(&Type::Any), target_obj);
                     quote! { (<_ as crate::SolarAsVal<#l_ct>>::as_val(&#l) % <_ as crate::SolarAsVal<#r_ct>>::as_val(&#r)) }
-                },
+                }
                 BinaryOp::AddAssign => {
                     let r_ct = compile_type_ext(r_ty.unwrap_or(&Type::Any), target_obj);
                     quote! { (#l += <_ as crate::SolarAsVal<#r_ct>>::as_val(&#r)) }
-                },
+                }
                 BinaryOp::SubAssign => {
                     let r_ct = compile_type_ext(r_ty.unwrap_or(&Type::Any), target_obj);
                     quote! { (#l -= <_ as crate::SolarAsVal<#r_ct>>::as_val(&#r)) }
-                },
+                }
+                BinaryOp::MulAssign => {
+                    let r_ct = compile_type_ext(r_ty.unwrap_or(&Type::Any), target_obj);
+                    quote! { (#l *= <_ as crate::SolarAsVal<#r_ct>>::as_val(&#r)) }
+                }
+                BinaryOp::DivAssign => {
+                    let r_ct = compile_type_ext(r_ty.unwrap_or(&Type::Any), target_obj);
+                    quote! { (#l /= <_ as crate::SolarAsVal<#r_ct>>::as_val(&#r)) }
+                }
+                BinaryOp::Or => {
+                    let r_ct = compile_type_ext(r_ty.unwrap_or(&Type::Any), target_obj);
+                    quote! { (#l || <_ as crate::SolarAsVal<#r_ct>>::as_val(&#r)) }
+                }
             }
         }
         ExprKind::Tuple(items) => {
-            let items = items.iter().map(|i| compile_expr(i, target_obj, false, type_info));
+            let items = items
+                .iter()
+                .map(|i| compile_expr(i, target_obj, false, type_info));
             quote! { (#( #items ),*) }
         }
         ExprKind::Array(items) => {
@@ -121,23 +141,29 @@ pub fn compile_expr(expr: &Expr, target_obj: Option<&String>, is_mut: bool, type
         ExprKind::Block(stmts) => {
             use crate::compiler::statements::compile_stmt;
             let len = stmts.len();
-            let stmts_compiled = stmts
-                .iter()
-                .enumerate()
-                .map(|(idx, s)| compile_stmt(s, idx == len - 1, target_obj, expr.ty.as_ref(), type_info));
+            let stmts_compiled = stmts.iter().enumerate().map(|(idx, s)| {
+                compile_stmt(s, idx == len - 1, target_obj, expr.ty.as_ref(), type_info)
+            });
             quote! { { #( #stmts_compiled )* } }
         }
         ExprKind::Call(path, args, resolved_name, arg_kinds, param_types) => {
             let is_phantom = matches!(expr.ty, Some(Type::Any));
             let name = path_to_string(path);
-            
+
             // Special handling for standard variants/macros
-            if name == "Some" || name == "None" || name == "Ok" || name == "Err" ||
-               name.ends_with("::Some") || name.ends_with("::None") || name.ends_with("::Ok") || name.ends_with("::Err") 
+            if name == "Some"
+                || name == "None"
+                || name == "Ok"
+                || name == "Err"
+                || name.ends_with("::Some")
+                || name.ends_with("::None")
+                || name.ends_with("::Ok")
+                || name.ends_with("::Err")
             {
                 let id = if let Some(resolved) = resolved_name {
                     if let Some(Type::Custom(_, generics)) = &expr.ty {
-                        if !generics.is_empty() && !generics.iter().any(|g| matches!(g, Type::Any)) {
+                        if !generics.is_empty() && !generics.iter().any(|g| matches!(g, Type::Any))
+                        {
                             let gens = generics.iter().map(|g| compile_type_ext(g, target_obj));
                             let base_id = compile_id_ext(resolved.trim_end_matches("<>"), true);
                             quote!(#base_id::<#( #gens ),*>)
@@ -172,22 +198,22 @@ pub fn compile_expr(expr: &Expr, target_obj: Option<&String>, is_mut: bool, type
                     return quote! { (0..crate::SolarAsSize::as_size(&#size)).map(|_| (#element)).collect::<Vec<#ty>>() };
                 }
             }
-            
+
             if name == "new" || name.ends_with("::new") {
-                 if let Some(part) = path.get(path.len().saturating_sub(2)) {
-                     if part.name == "Vector" || part.name == "Vec" {
-                         let ty_src = if let Some(Type::Custom(_, gens)) = &expr.ty {
-                             if !gens.is_empty() && !matches!(gens[0], Type::Any) {
-                                 compile_type_ext(&gens[0], target_obj)
-                             } else {
-                                 quote!(_)
-                             }
-                         } else {
-                             quote!(_)
-                         };
-                         return quote! { Vec::<#ty_src>::new() };
-                     }
-                 }
+                if let Some(part) = path.get(path.len().saturating_sub(2)) {
+                    if part.name == "Vector" || part.name == "Vec" {
+                        let ty_src = if let Some(Type::Custom(_, gens)) = &expr.ty {
+                            if !gens.is_empty() && !matches!(gens[0], Type::Any) {
+                                compile_type_ext(&gens[0], target_obj)
+                            } else {
+                                quote!(_)
+                            }
+                        } else {
+                            quote!(_)
+                        };
+                        return quote! { Vec::<#ty_src>::new() };
+                    }
+                }
             }
 
             let id = if let Some(resolved) = resolved_name {
@@ -217,10 +243,24 @@ pub fn compile_expr(expr: &Expr, target_obj: Option<&String>, is_mut: bool, type
                         .unwrap_or(ArgKind::Value);
                     let mutable_expr_for_wrap = matches!(kind, ArgKind::MutRef);
                     if is_phantom && matches!(kind, ArgKind::Value) {
-                        return wrap_expr_for_ref(a, Some(&Type::Any), target_obj, mutable_expr_for_wrap, kind, type_info);
+                        return wrap_expr_for_ref(
+                            a,
+                            Some(&Type::Any),
+                            target_obj,
+                            mutable_expr_for_wrap,
+                            kind,
+                            type_info,
+                        );
                     }
                     let expected = param_types.as_ref().and_then(|pts| pts.get(i));
-                    wrap_expr_for_ref(a, expected, target_obj, mutable_expr_for_wrap, kind, type_info)
+                    wrap_expr_for_ref(
+                        a,
+                        expected,
+                        target_obj,
+                        mutable_expr_for_wrap,
+                        kind,
+                        type_info,
+                    )
                 })
                 .collect::<Vec<_>>();
             quote! { #id(#( #args_compiled ),*) }
@@ -258,14 +298,15 @@ pub fn compile_expr(expr: &Expr, target_obj: Option<&String>, is_mut: bool, type
             let mut name_to_use = name.clone();
             if let Some(obj) = resolved_obj_name {
                 let obj_low = obj.to_lowercase();
-                if !name.starts_with("solar_") && (
-                       ["string", "str", "vector", "vec", "i32", "i64", "f32", "f64", "array"]
-                       .contains(&obj_low.as_str())
-                       || obj_low.contains("string")
-                       || obj_low.contains("str")
-                       || obj_low.contains("vector")
-                       || obj_low.contains("vec")
-                   )
+                if !name.starts_with("solar_")
+                    && ([
+                        "string", "str", "vector", "vec", "i32", "i64", "f32", "f64", "array",
+                    ]
+                    .contains(&obj_low.as_str())
+                        || obj_low.contains("string")
+                        || obj_low.contains("str")
+                        || obj_low.contains("vector")
+                        || obj_low.contains("vec"))
                 {
                     name_to_use = format!("solar_{}", name);
                 }
@@ -282,10 +323,24 @@ pub fn compile_expr(expr: &Expr, target_obj: Option<&String>, is_mut: bool, type
                         .unwrap_or(ArgKind::Value);
                     let mutable_expr_for_wrap = matches!(kind, ArgKind::MutRef);
                     if is_phantom && matches!(kind, ArgKind::Value) {
-                        return wrap_expr_for_ref(a, Some(&Type::Any), target_obj, mutable_expr_for_wrap, kind, type_info);
+                        return wrap_expr_for_ref(
+                            a,
+                            Some(&Type::Any),
+                            target_obj,
+                            mutable_expr_for_wrap,
+                            kind,
+                            type_info,
+                        );
                     }
                     let expected = param_types.as_ref().and_then(|pts| pts.get(i));
-                    wrap_expr_for_ref(a, expected, target_obj, mutable_expr_for_wrap, kind, type_info)
+                    wrap_expr_for_ref(
+                        a,
+                        expected,
+                        target_obj,
+                        mutable_expr_for_wrap,
+                        kind,
+                        type_info,
+                    )
                 })
                 .collect::<Vec<_>>();
 
@@ -391,9 +446,12 @@ pub fn compile_expr(expr: &Expr, target_obj: Option<&String>, is_mut: bool, type
                     false
                 };
                 match &fval.ty {
-                    Some(Type::Ref(_, _)) | Some(Type::RawPtr(_, _)) | Some(Type::Managed(_)) |
-                    Some(Type::ThreadSafe(_)) | Some(Type::BoxPtr(_)) | Some(Type::Array(_, _)) => 
-                        quote! { #id: #v },
+                    Some(Type::Ref(_, _))
+                    | Some(Type::RawPtr(_, _))
+                    | Some(Type::Managed(_))
+                    | Some(Type::ThreadSafe(_))
+                    | Some(Type::BoxPtr(_))
+                    | Some(Type::Array(_, _)) => quote! { #id: #v },
                     _ if has_v_clone => quote! { #id: (&#v).as_val() },
                     _ => quote! { #id: #v },
                 }
@@ -420,7 +478,10 @@ pub fn compile_expr(expr: &Expr, target_obj: Option<&String>, is_mut: bool, type
                 return quote! { crate::SolarCow::Borrowed(crate::solar_typeof(&#e)) };
             }
 
-            if name == "println" || name == "print" || name == "log" || name == "logln" || name == "dbg"
+            if name == "println"
+                || name == "log"
+                || name == "logln"
+                || name == "dbg"
             {
                 if args.is_empty() {
                     quote! { #name_id!() }
@@ -472,16 +533,23 @@ pub fn compile_expr(expr: &Expr, target_obj: Option<&String>, is_mut: bool, type
                     quote! { (&#e).as_val() }
                 }
             } else {
-                let args_compiled = args.iter().map(|a| {
-                    let e = compile_expr(a, target_obj, false, type_info);
-                    quote!(&#e)
-                }).collect::<Vec<_>>();
+                let args_compiled = args
+                    .iter()
+                    .map(|a| {
+                        let e = compile_expr(a, target_obj, false, type_info);
+                        quote!(&#e)
+                    })
+                    .collect::<Vec<_>>();
                 quote! { #name_id!(#( #args_compiled ),*) }
             }
         }
         ExprKind::Borrow(inner, mutable) => {
             let e = compile_expr(inner, target_obj, *mutable, type_info);
-            if *mutable { quote!(&mut #e) } else { quote!(&#e) }
+            if *mutable {
+                quote!(&mut #e)
+            } else {
+                quote!(&#e)
+            }
         }
         ExprKind::Deref(inner) => {
             let e = compile_expr(inner, target_obj, false, type_info);
@@ -491,8 +559,12 @@ pub fn compile_expr(expr: &Expr, target_obj: Option<&String>, is_mut: bool, type
             let e = compile_expr(inner, target_obj, false, type_info);
             match kind {
                 crate::ast::AllocKind::Box => quote!(Box::new((#e).clone())),
-                crate::ast::AllocKind::Rc => quote!(::std::rc::Rc::new(::std::cell::RefCell::new((#e).clone()))),
-                crate::ast::AllocKind::Arc => quote!(::std::sync::Arc::new(::parking_lot::RwLock::new((#e).clone()))),
+                crate::ast::AllocKind::Rc => {
+                    quote!(::std::rc::Rc::new(::std::cell::RefCell::new((#e).clone())))
+                }
+                crate::ast::AllocKind::Arc => {
+                    quote!(::std::sync::Arc::new(::parking_lot::RwLock::new((#e).clone())))
+                }
                 crate::ast::AllocKind::RawMut | crate::ast::AllocKind::RawConst => quote!((#e)),
             }
         }

@@ -415,7 +415,7 @@ pub(crate) fn generate_solar_std(has_macroquad: bool) -> TokenStream {
     impl crate::SolarAsVal<()> for &() { fn as_val(&self) -> () { **self } }
 
     };
-    
+
     let mut final_stream = stream;
     if has_macroquad {
         final_stream.extend(quote! {
@@ -567,5 +567,5 @@ pub(crate) fn generate_solar_std(has_macroquad: bool) -> TokenStream {
         pub fn tau64() -> f64 { ::std::f64::consts::TAU }
     }
         });
-        final_stream
+    final_stream
 }

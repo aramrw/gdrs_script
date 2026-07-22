@@ -40,7 +40,10 @@ pub enum BinaryOp {
     Equal,
     Modulo,
     AddAssign,
-    SubAssign
+    SubAssign,
+    MulAssign,
+    DivAssign,
+    Or,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

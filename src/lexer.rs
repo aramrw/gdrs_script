@@ -92,7 +92,10 @@ pub enum Token {
     Dedent,
     Attribute(String),
     AddAssign,
-    SubAssign
+    SubAssign,
+    MulAssign,
+    DivAssign,
+    Or,
 }
 
 impl fmt::Display for Token {
@@ -151,6 +154,10 @@ impl Token {
             Token::Boolean(b) => b.to_string(),
             Token::String(s) => format!("\"{}\"", s),
             Token::Ident(s) => s.clone(),
+            Token::AddAssign => "+=".into(),
+            Token::SubAssign => "-=".into(),
+            Token::MulAssign => "*=".into(),
+            Token::DivAssign => "/=".into(),
             Token::Plus => "+".to_string(),
             Token::Minus => "-".to_string(),
             Token::Star => "*".to_string(),
@@ -182,8 +189,7 @@ impl Token {
             Token::Dedent => "".to_string(),
             Token::Attribute(s) => format!("#[{}]", s),
             Token::Modulo => "%".into(),
-            Token::AddAssign => "+=".into(),
-            Token::SubAssign => "-=".into(),
+            Token::Or => "||".into(),
         }
     }
 }
@@ -315,10 +321,35 @@ pub fn lex(source: &str) -> Result<Vec<(Token, Span)>, LexError> {
                         tokens.push((Token::Plus, span(1)));
                     }
                 }
+                '-' => {
+                    if chars.peek().map(|&(_, c)| c) == Some('>') {
+                        chars.next();
+                        tokens.push((Token::Arrow, span(2)));
+                    } else if chars.peek().map(|&(_, c)| c) == Some('=') {
+                        chars.next();
+                        tokens.push((Token::SubAssign, span(2)));
+                    } else {
+                        tokens.push((Token::Minus, span(1)));
+                    }
+                }
                 '&' => tokens.push((Token::Amp, span(1))),
                 '%' => tokens.push((Token::Modulo, span(1))),
-                '*' => tokens.push((Token::Star, span(1))),
-                '/' => tokens.push((Token::Div, span(1))),
+                '*' => {
+                    if chars.peek().map(|&(_, c)| c) == Some('=') {
+                        chars.next();
+                        tokens.push((Token::MulAssign, span(2)));
+                    } else {
+                        tokens.push((Token::Star, span(1)));
+                    }
+                }
+                '/' => {
+                    if chars.peek().map(|&(_, c)| c) == Some('=') {
+                        chars.next();
+                        tokens.push((Token::DivAssign, span(2)));
+                    } else {
+                        tokens.push((Token::Div, span(1)));
+                    }
+                }
                 '>' => {
                     if chars.peek().map(|&(_, c)| c) == Some('=') {
                         chars.next();
@@ -339,6 +370,14 @@ pub fn lex(source: &str) -> Result<Vec<(Token, Span)>, LexError> {
                 '?' => tokens.push((Token::QuestionMark, span(1))),
                 '!' => tokens.push((Token::Bang, span(1))),
                 '~' => tokens.push((Token::Tilde, span(1))),
+                '|' => {
+                    if chars.peek().map(|&(_, c)| c) == Some('|') {
+                        chars.next();
+                        tokens.push((Token::Or, span(2)));
+                    } else {
+                        tokens.push(((Token::Or), span(1)));
+                    }
+                }
                 '@' => {
                     let mut s = String::new();
                     let start = current_pos;
@@ -360,14 +399,6 @@ pub fn lex(source: &str) -> Result<Vec<(Token, Span)>, LexError> {
                     let end =
                         trimmed_start_offset + chars.peek().map_or(trimmed.len(), |&(i, _)| i);
                     tokens.push((Token::Attribute(s), SimpleSpan::from(start..end)));
-                }
-                '-' => {
-                    if chars.peek().map(|&(_, c)| c) == Some('>') {
-                        chars.next();
-                        tokens.push((Token::Arrow, span(2)));
-                    } else {
-                        tokens.push((Token::Minus, span(1)));
-                    }
                 }
                 ':' => {
                     if chars.peek().map(|&(_, c)| c) == Some(':') {

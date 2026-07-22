@@ -1,7 +1,11 @@
 use proc_macro2::TokenStream;
 use quote::quote;
 
-use crate::{ast::{Function, Type}, compiler::{compile_generics, statements::compile_stmt, types::compile_type_ext}, sema::TypeInfo};
+use crate::{
+    ast::{Function, Type},
+    compiler::{compile_generics, statements::compile_stmt, types::compile_type_ext},
+    sema::TypeInfo,
+};
 
 pub fn compile_function(
     func: &Function,
@@ -63,9 +67,21 @@ pub fn compile_function(
                 quote! { #p_name: &str }
             } else {
                 let p_ty = compile_type_ext(&p.ty, target_obj);
+
+                let is_primitive = matches!(
+                    p.ty,
+                    Type::I32 | Type::I64 | Type::F32 | Type::F64 | Type::Bool
+                );
+
                 // ALL Solar function parameters are passed by reference in the generated Rust
                 // unless they are already references.
-                if matches!(p.ty, Type::Ref(_, _)) {
+                if is_primitive {
+                    if p.is_mutable {
+                        quote!(mut #p_name: #p_ty)
+                    } else {
+                        quote!(#p_name: #p_ty)
+                    }
+                } else if matches!(p.ty, Type::Ref(_, _)) {
                     quote!(#p_name: #p_ty)
                 } else if p.is_mutable {
                     quote!(#p_name: &mut #p_ty)

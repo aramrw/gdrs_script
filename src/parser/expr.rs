@@ -175,7 +175,12 @@ where
         .map(|e| ExprKind::Negate(Box::new(e)))
         .into_expr();
 
-    let call_path = identifier_path.clone().or(just(Token::Str).to(vec![PathPart { name: "str".into(), generics: vec![] }]));
+    let call_path = identifier_path
+        .clone()
+        .or(just(Token::Str).to(vec![PathPart {
+            name: "str".into(),
+            generics: vec![],
+        }]));
 
     let namespaced_call = call_path
         .clone()
@@ -302,14 +307,19 @@ where
         }
     });
 
-    let mul_op = just(Token::Star)
-        .to(BinaryOp::Multiply)
-        .or(just(Token::Div).to(BinaryOp::Divide))
-        .or(just(Token::Modulo).to(BinaryOp::Modulo));
+    let mul_op = choice((
+        just(Token::Star).to(BinaryOp::Multiply),
+        just(Token::MulAssign).to(BinaryOp::MulAssign), 
+        just(Token::Div).to(BinaryOp::Divide),
+        just(Token::DivAssign).to(BinaryOp::DivAssign), 
+        just(Token::Modulo).to(BinaryOp::Modulo),
+    ));
+
     let add_op = just(Token::Plus)
         .to(BinaryOp::Add)
         .or(just(Token::Minus).to(BinaryOp::Subtract))
         .or(just(Token::AddAssign).to(BinaryOp::AddAssign));
+
     let cmp_op = choice((
         just(Token::GtEq).to(BinaryOp::GreaterThanOrEqual),
         just(Token::LtEq).to(BinaryOp::LessThanOrEqual),
@@ -340,7 +350,8 @@ where
             }
         });
 
-    sum.clone()
+    let comparison = sum
+        .clone()
         .foldl(cmp_op.then(sum).repeated(), |lhs, (op, rhs)| {
             let span = lhs.span;
             Expr {
@@ -348,5 +359,17 @@ where
                 span,
                 ty: None,
             }
-        })
+        });
+
+    comparison.clone().foldl(
+        just(Token::Or).to(BinaryOp::Or).then(comparison).repeated(),
+        |lhs, (op, rhs)| {
+            let span = lhs.span;
+            Expr {
+                kind: ExprKind::Binary(Box::new(lhs), op, Box::new(rhs)),
+                span,
+                ty: None,
+            }
+        },
+    )
 }

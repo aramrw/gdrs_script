@@ -1,27 +1,32 @@
-rust dependency macroquad = "0.4.14"
+use rust::std::ops::Sub;
 
-use rust::macroquad::prelude::*;
+#[derive(Clone, Debug)]
+obj Vec2:
+	x: f32
+	y: f32
 
-#[macroquad::main("Bouncing Ball")]
-async fn main():
-    let mut x = screen_width() / 2.0
-    let mut y = screen_height() / 2.0
-    let mut dx = 5.0
-    let mut dy = 5.0
-    let radius = 20.0
+fn vec2(x: f32, y: f32) -> Vec2:
+		Vec2 { x, y }
 
-    loop:
-        clear_background(DARKGRAY)
+impl Vec2:
+	fn self_pow2(self) -> Self:
+		var x2 = self.x *= self.x
+		var y2 = self.y *= self.x
+		var vec2 = Vec2 { x: x2, y: y2 }
+		vec2
+		
 
-        x += dx
-        y += dy
+//impl Sub for Vec2:
+	//type Output = Vec2;
+	//fn sub(self, other: Vec2):
+		//Vec2 { 
+				//x: self.x - other.x,
+				//y: self.y - other.y
+			//}
 
-        if x <= radius || x >= screen_width() - radius:
-            dx *= -1.0
-        
-        if y <= radius || y >= screen_height() - radius:
-            dy *= -1.0
+fn main():
+	var v1 = vec2(20.0, 30.0)
+	var v2 = vec2(40.0, 20.0)
 
-        draw_circle(x, y, radius, RED)
-
-        next_frame().await
+	//var sum = v1 - v2
+	//dbg!(sum);
