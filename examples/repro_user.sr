@@ -1,0 +1,52 @@
+rust dependency pprof2 = { version = "0.13.1", features = ["flamegraph"]}
+
+use rust::std::vec::Vec;
+use rust::std::env::args;
+use rust::std::path::PathBuf;
+use rust::std::option::Option;
+
+use rust::pprof2::ProfilerGuard;
+
+@derive(Debug, Default, Clone)
+obj ParsedArg:
+    buf: string
+
+@derive(Debug, Default)
+obj Cli:
+    exe: string
+    pargs: Vec<ParsedArg>
+
+impl Cli:
+  /// parses the cli input
+  fn parse(&mut self):
+    var args = args()
+    var mut i = 0
+    for arg in args:
+        if i == 0:
+            self.exe = arg
+        else:
+            var pa = ParsedArg { buf: arg }
+            self.pargs.push(&pa)
+        i += 1
+
+  fn has_arg(&self, expect: &str) -> bool:
+    // pargs.get() expects an &i32 for indexing..?
+    var first_arg: Option<ParsedArg> = self.pargs.get(&0)
+    if first_arg.is_none():
+       return false
+
+    var first_arg: ParsedArg = first_arg.unwrap()
+    if first_arg.buf == expect:
+       return true
+    else:
+       return false
+
+fn main():
+    var guard = ProfilerGuard::new(100).unwrap()
+    var mut cli = Cli::default()
+    cli.parse()
+    dbg!(cli)
+    
+    var report = guard.report().build().unwrap()
+    var file = std::fs::File::create("flamegraph.svg")?;
+    report.flamegraph(file).unwrap()

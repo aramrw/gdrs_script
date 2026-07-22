@@ -1,0 +1,104 @@
+==================
+Function with block
+==================
+fn main():
+    var x = 1
+    return x
+
+---
+
+(source_file
+  (function_definition
+    (identifier)
+    (parameters)
+    (block
+      (variable_declaration
+        (identifier)
+        (number))
+      (return_statement
+        (identifier_path
+          (identifier))))))
+
+==================
+While loop
+==================
+while true:
+    var i = 1
+    i = i + 1
+
+---
+
+(source_file
+  (while_statement
+    (boolean)
+    (block
+      (variable_declaration
+        (identifier)
+        (number))
+      (assignment_statement
+        (identifier_path
+          (identifier))
+        (binary_expression
+          (identifier_path
+            (identifier))
+          (number))))))
+
+==================
+Object and Impl
+==================
+obj Point:
+    x: i32
+    y: i32
+
+impl Point:
+    fn new(x: i32, y: i32) -> Point:
+        return Point{x: x, y: y}
+
+---
+
+(source_file
+  (object_definition
+    (identifier)
+    (field_definition
+      (identifier)
+      (type
+        (identifier_path
+          (identifier))))
+    (field_definition
+      (identifier)
+      (type
+        (identifier_path
+          (identifier)))))
+  (impl_definition
+    (type
+      (identifier_path
+        (identifier)))
+    (function_definition
+      (identifier)
+      (parameters
+        (parameter
+          (identifier)
+          (type
+            (identifier_path
+              (identifier))))
+        (parameter
+          (identifier)
+          (type
+            (identifier_path
+              (identifier)))))
+      (type
+        (identifier_path
+          (identifier)))
+      (block
+        (return_statement
+          (struct_literal
+            (identifier_path
+              (identifier))
+            (struct_field
+              (identifier)
+              (identifier_path
+                (identifier)))
+            (struct_field
+              (identifier)
+              (identifier_path
+                (identifier)))))))))

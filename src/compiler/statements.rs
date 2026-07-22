@@ -1,13 +1,18 @@
 use proc_macro2::TokenStream;
 use quote::quote;
 
-use crate::{ast::{ExprKind, Stmt, StmtKind, Type}, compiler::{compile_expr, compile_pattern, types::compile_type_ext}};
+use crate::{
+    ast::{ExprKind, Stmt, StmtKind, Type},
+    compiler::{compile_expr, compile_pattern, types::compile_type_ext, has_clone},
+    sema::TypeInfo,
+};
 
 pub fn compile_stmt(
     stmt: &Stmt,
     is_last: bool,
     target_obj: Option<&String>,
     expected_ret: Option<&Type>,
+    type_info: &TypeInfo,
 ) -> TokenStream {
     match &stmt.kind {
         StmtKind::VarDecl {
@@ -19,9 +24,9 @@ pub fn compile_stmt(
             let id = quote::format_ident!("{}", name);
             let mut_kw = if *is_mutable { quote!(mut) } else { quote!() };
 
-            let val_raw = compile_expr(value, target_obj, false);
+            let val_raw = compile_expr(value, target_obj, false, type_info);
 
-            // If the expression returns a reference in Rust (Alloc, Downgrade), 
+            // If the expression returns a reference in Rust (Alloc, Downgrade),
             // but for a variable declaration we want the owned value.
             let returns_ref = match &value.kind {
                 ExprKind::Alloc(_, _) | ExprKind::Downgrade(_) => true,
@@ -34,13 +39,20 @@ pub fn compile_stmt(
             let final_ty = expected_ty.as_ref().or(value.ty.as_ref());
 
             let (ty_tokens, final_val) = if let Some(pt) = final_ty {
-                let ct = if matches!(pt, Type::Str) {
-                    quote!(&str)
+                let ct = compile_type_ext(pt, target_obj);
+
+                let mut val_src = if returns_ref {
+                    quote! { (#val_raw).clone() }
+                } else if let Some(ty) = final_ty {
+                    if has_clone(ty, type_info) {
+                        let ct = compile_type_ext(ty, target_obj);
+                        quote! { <_ as crate::SolarAsVal<#ct>>::as_val(&#val_raw) }
+                    } else {
+                        val_raw.clone()
+                    }
                 } else {
-                    compile_type_ext(pt, target_obj)
+                    val_raw.clone()
                 };
-                
-                let mut val_src = if returns_ref { quote! { (#val_raw).clone() } } else { val_raw.clone() };
 
                 let val_managed = match pt {
                     Type::Managed(_) if !matches!(value.ty, Some(Type::Managed(_))) => {
@@ -56,40 +68,73 @@ pub fn compile_stmt(
                 };
                 (quote!(: #ct), val_managed)
             } else {
-                let final_val = if returns_ref { quote! { (#val_raw).clone() } } else { val_raw };
+                let final_val = if returns_ref {
+                    quote! { (#val_raw).clone() }
+                } else {
+                    val_raw
+                };
                 (quote!(), final_val)
             };
 
             quote! { let #mut_kw #id #ty_tokens = #final_val; }
         }
         StmtKind::Assign { target, value } => {
-            let v = compile_expr(value, target_obj, false);
+            let v = compile_expr(value, target_obj, false, type_info);
+            let val_src = if let Some(ty) = &value.ty {
+                if has_clone(ty, type_info) {
+                    let ct = compile_type_ext(ty, target_obj);
+                    quote! { <_ as crate::SolarAsVal<#ct>>::as_val(&#v) }
+                } else {
+                    v
+                }
+            } else {
+                v
+            };
+
             if let ExprKind::IndexAccess(lhs, index) = &target.kind {
-                let l = compile_expr(lhs, target_obj, true);
-                let i = compile_expr(index, target_obj, false);
+                let l = compile_expr(lhs, target_obj, true, type_info);
+                let i = compile_expr(index, target_obj, false, type_info);
                 quote! {
                     {
-                        let __val = (&#v).as_val();
-                        #l.solar_index_mut(#i, __val);
+                        let __val = #val_src;
+                        (#l)[crate::SolarAsSize::as_size(&(#i))] = __val;
                     }
                 }
             } else {
-                let t = compile_expr(target, target_obj, true);
+                let t = compile_expr(target, target_obj, true, type_info);
                 quote! {
                     {
-                        let __val = (&#v).as_val();
+                        let __val = #val_src;
                         #t = __val;
                     }
                 }
             }
         }
         StmtKind::ExprStmt(expr) => {
-            let e = compile_expr(expr, target_obj, false);
+            let e = compile_expr(expr, target_obj, false, type_info);
             if is_last {
                 if let Some(Type::Result(_, _)) = expected_ret {
-                    quote! { Ok(#e) }
+                    if let Some(ty) = &expr.ty {
+                        if has_clone(ty, type_info) {
+                            quote! { Ok((&#e).as_val()) }
+                        } else {
+                            quote! { Ok(#e) }
+                        }
+                    } else {
+                        quote! { Ok(#e) }
+                    }
                 } else if matches!(expected_ret, Some(Type::Unit)) {
                     quote! { { #e; () } }
+                } else if expected_ret.is_some() {
+                    if let Some(ty) = &expr.ty {
+                        if has_clone(ty, type_info) {
+                            quote! { (&#e).as_val() }
+                        } else {
+                            quote! { #e }
+                        }
+                    } else {
+                        quote! { #e }
+                    }
                 } else {
                     quote! { #e }
                 }
@@ -99,11 +144,13 @@ pub fn compile_stmt(
         }
         StmtKind::Return(expr) => {
             if let Some(e) = expr {
-                let e_compiled = compile_expr(e, target_obj, false);
+                let e_compiled = compile_expr(e, target_obj, false, type_info);
+                let ty = e.ty.as_ref().unwrap_or(&Type::Any);
+                let ct = compile_type_ext(ty, target_obj);
                 if let Some(Type::Result(_, _)) = expected_ret {
-                    quote! { return Ok(#e_compiled); }
+                    quote! { return Ok(<_ as crate::SolarAsVal<#ct>>::as_val(&#e_compiled)); }
                 } else {
-                    quote! { return #e_compiled; }
+                    quote! { return <_ as crate::SolarAsVal<#ct>>::as_val(&#e_compiled); }
                 }
             } else {
                 if let Some(Type::Result(_, _)) = expected_ret {
@@ -118,22 +165,28 @@ pub fn compile_stmt(
             then_branch,
             else_branch,
         } => {
-            let cond = compile_expr(condition, target_obj, false);
-            let then_tokens = compile_stmt(then_branch, is_last, target_obj, expected_ret);
+            let cond = compile_expr(condition, target_obj, false, type_info);
+            let then_tokens = compile_stmt(then_branch, is_last, target_obj, expected_ret, type_info);
             if let Some(else_stmt) = else_branch {
-                let else_tokens = compile_stmt(else_stmt, is_last, target_obj, expected_ret);
+                let else_tokens = compile_stmt(else_stmt, is_last, target_obj, expected_ret, type_info);
                 quote! { if #cond { #then_tokens } else { #else_tokens } }
             } else {
                 quote! { if #cond { #then_tokens } }
             }
         }
         StmtKind::While { condition, body } => {
-            let cond = compile_expr(condition, target_obj, false);
-            let body_tokens = compile_stmt(body, false, target_obj, expected_ret);
+            let cond = compile_expr(condition, target_obj, false, type_info);
+            let body_tokens = compile_stmt(body, false, target_obj, expected_ret, type_info);
             quote! { while #cond { #body_tokens } }
         }
+        StmtKind::For { var_name, iterator, body } => {
+            let id = quote::format_ident!("{}", var_name);
+            let iter = compile_expr(iterator, target_obj, false, type_info);
+            let body_tokens = compile_stmt(body, false, target_obj, expected_ret, type_info);
+            quote! { for #id in #iter { #body_tokens } }
+        }
         StmtKind::Loop { body } => {
-            let body_tokens = compile_stmt(body, false, target_obj, expected_ret);
+            let body_tokens = compile_stmt(body, false, target_obj, expected_ret, type_info);
             quote! { loop { #body_tokens } }
         }
         StmtKind::Block(stmts) => {
@@ -145,6 +198,7 @@ pub fn compile_stmt(
                     is_last && is_last_in_block,
                     target_obj,
                     expected_ret,
+                    type_info,
                 ));
             }
             quote! { { #tokens } }
@@ -158,23 +212,24 @@ pub fn compile_stmt(
                     is_last && is_last_in_block,
                     target_obj,
                     expected_ret,
+                    type_info,
                 ));
             }
             quote! { unsafe { #tokens } }
         }
         StmtKind::Break(expr) => {
             if let Some(e) = expr {
-                let e_compiled = compile_expr(e, target_obj, false);
+                let e_compiled = compile_expr(e, target_obj, false, type_info);
                 quote!(break #e_compiled;)
             } else {
                 quote!(break;)
             }
         }
         StmtKind::Match { expr, arms } => {
-            let e = compile_expr(expr, target_obj, false);
+            let e = compile_expr(expr, target_obj, false, type_info);
             let arm_tokens = arms.iter().map(|arm| {
-                let pat = compile_pattern(&arm.pattern);
-                let body = compile_stmt(&arm.body, is_last, target_obj, expected_ret);
+                let pat = compile_pattern(&arm.pattern, type_info);
+                let body = compile_stmt(&arm.body, is_last, target_obj, expected_ret, type_info);
                 quote! { #pat => { #body } }
             });
             quote! { match #e { #( #arm_tokens ),* } }

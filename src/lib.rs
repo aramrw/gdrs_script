@@ -23,37 +23,35 @@ pub fn resolve_module(
     std_path: Option<&Path>,
     parts: &[String],
 ) -> Option<PathBuf> {
-    if let Some(std) = std_path {
-        if parts.first().map(|s| s.as_str()) == Some("std") {
-            let mut path = std.to_path_buf();
-            for part in &parts[1..] {
-                path.push(part);
-            }
-            let sr_path = path.with_extension("sr");
-            if sr_path.exists() {
-                return Some(sr_path);
-            }
-            let mod_sr_path = path.join("mod.sr");
-            if mod_sr_path.exists() {
-                return Some(mod_sr_path);
-            }
-            return None;
-        }
-    }
-
+    // 1. Try relative to current_dir
     let mut path = current_dir.to_path_buf();
     for part in parts {
         path.push(part);
     }
-
     let sr_path = path.with_extension("sr");
     if sr_path.exists() {
         return Some(sr_path);
     }
-
     let mod_sr_path = path.join("mod.sr");
     if mod_sr_path.exists() {
         return Some(mod_sr_path);
+    }
+
+    // 2. Try in stext directory (with or without 'stext' prefix)
+    if let Some(stext) = std_path {
+        let mut path = stext.to_path_buf();
+        let skip = if parts.first().map(|s| s.as_str()) == Some("stext") { 1 } else { 0 };
+        for part in &parts[skip..] {
+            path.push(part);
+        }
+        let sr_path = path.with_extension("sr");
+        if sr_path.exists() {
+            return Some(sr_path);
+        }
+        let mod_sr_path = path.join("mod.sr");
+        if mod_sr_path.exists() {
+            return Some(mod_sr_path);
+        }
     }
 
     None
@@ -70,7 +68,7 @@ pub fn run_compiler(file_path: &str) -> Result<(), Box<dyn std::error::Error>> {
     loaded.insert(root_path.clone());
 
     let cwd = env::current_dir().unwrap();
-    let std_path = cwd.join("std");
+    let std_path = cwd.join("stext");
     let std_path = if std_path.exists() {
         Some(std_path)
     } else {
@@ -97,20 +95,26 @@ pub fn run_compiler(file_path: &str) -> Result<(), Box<dyn std::error::Error>> {
                 let mut deps = Vec::new();
                 for decl in &program.declarations {
                     if let Decl::Use(u) = decl {
-                        if u.is_crate {
+                        if u.is_rust {
                             continue;
                         }
-                        if let Some(mod_path) =
-                            resolve_module(current_dir, std_path.as_deref(), &u.path)
-                        {
-                            let abs_mod_path = fs::canonicalize(mod_path).unwrap();
-                            let mod_name = u.path.join("::");
-                            deps.push((mod_name, abs_mod_path.clone()));
-                            if !loaded.contains(&abs_mod_path) {
-                                loaded.insert(abs_mod_path.clone());
-                                queue.push_back(abs_mod_path);
+                        let mut found = false;
+                        for i in (1..=u.path.len()).rev() {
+                            let prefix = &u.path[..i];
+                            if let Some(mod_path) = resolve_module(current_dir, std_path.as_deref(), prefix) {
+                                let abs_mod_path = fs::canonicalize(mod_path).unwrap();
+                                let mod_name = prefix.join("::");
+                                deps.push((mod_name, abs_mod_path.clone()));
+                                if !loaded.contains(&abs_mod_path) {
+                                    loaded.insert(abs_mod_path.clone());
+                                    queue.push_back(abs_mod_path);
+                                }
+                                found = true;
+                                break;
                             }
-                        } else {
+                        }
+
+                        if !found {
                             let mod_name = u.path.join("::");
                             return Err(format!(
                                 "[module error]: Could not resolve module '{}' from {:?}",
@@ -148,7 +152,7 @@ pub fn run_compiler(file_path: &str) -> Result<(), Box<dyn std::error::Error>> {
     }
 
     let output_name = format!("sr_{}", root_path.file_stem().unwrap().to_str().unwrap());
-    compile(program, &output_name);
+    compile(program, &output_name, &sema.type_info);
     println!("compiled in {}ms", instant.elapsed().as_millis());
     Ok(())
 }
@@ -167,7 +171,7 @@ pub fn reconstruct(
     let mut decls = Vec::new();
 
     for (mod_name, dep_path) in deps {
-        let name_to_use = mod_name.clone();
+        let name_to_use = mod_name.strip_prefix("stext::").unwrap_or(mod_name).to_string();
         let dep_decls = reconstruct(dep_path, processed, visited);
         if !dep_decls.is_empty() {
             let parts: Vec<&str> = name_to_use.split("::").collect();
@@ -181,10 +185,8 @@ pub fn reconstruct(
     }
 
     for decl in &program.declarations {
-        if let Decl::Use(u) = decl {
-            if u.is_crate {
-                decls.push(decl.clone());
-            }
+        if let Decl::Use(_) = decl {
+            decls.push(decl.clone());
         } else if !matches!(decl, Decl::Module(_, _)) {
             decls.push(decl.clone());
         }

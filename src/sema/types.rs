@@ -1,11 +1,10 @@
-
 // src/sema/types.rs
 
-use std::collections::{HashMap, HashSet};
 use crate::ast::*;
 use crate::error::CompilerError;
 use crate::lexer::Span;
 use miette::SourceSpan;
+use std::collections::{HashMap, HashSet};
 
 // --- Helper struct ---
 #[derive(Debug, Clone)]
@@ -19,9 +18,24 @@ pub struct TraitInfo {
 #[derive(Debug)]
 pub struct TypeInfo {
     pub functions: HashMap<String, (Vec<(Type, ArgKind)>, Option<Type>)>,
-    pub objects: HashMap<String, (HashMap<String, Type>, Vec<(String, Vec<String>)>)>,
-    pub enums: HashMap<String, (HashMap<String, Vec<Type>>, Vec<(String, Vec<String>)>)>,
+    pub objects: HashMap<
+        String,
+        (
+            HashMap<String, Type>,
+            Vec<(String, Vec<String>)>,
+            Vec<String>,
+        ),
+    >,
+    pub enums: HashMap<
+        String,
+        (
+            HashMap<String, Vec<Type>>,
+            Vec<(String, Vec<String>)>,
+            Vec<String>,
+        ),
+    >,
     pub traits: HashMap<String, TraitInfo>,
+    pub constants: HashMap<String, Type>,
     pub generic_params: HashMap<String, Vec<String>>,
     pub aliases: HashMap<String, String>,
     pub phantom_types: HashSet<String>,
@@ -35,6 +49,7 @@ impl TypeInfo {
             objects: HashMap::new(),
             enums: HashMap::new(),
             traits: HashMap::new(),
+            constants: HashMap::new(),
             generic_params: HashMap::new(),
             aliases: HashMap::new(),
             phantom_types: HashSet::new(),
@@ -46,7 +61,10 @@ impl TypeInfo {
             "mem::free".to_string(),
             (
                 vec![
-                    (Type::Ref(Box::new(Type::RawPtr(Box::new(Type::Any), true)), false), ArgKind::Ref),
+                    (
+                        Type::Ref(Box::new(Type::RawPtr(Box::new(Type::Any), true)), false),
+                        ArgKind::Ref,
+                    ),
                     (Type::Ref(Box::new(Type::I32), false), ArgKind::Ref),
                 ],
                 None,
@@ -61,102 +79,232 @@ impl TypeInfo {
         );
         type_info.functions.insert(
             "fs::read_to_string".to_string(),
-            (vec![(Type::Str, ArgKind::Value)], Some(Type::String)),
+            (vec![(Type::Str, ArgKind::Value)], Some(Type::Str)),
         );
         type_info
             .functions
-            .insert("io::readline".to_string(), (vec![], Some(Type::String)));
-        type_info.functions
-            .insert("io::println".to_string(), (vec![(Type::Str, ArgKind::Value)], None));
+            .insert("io::readline".to_string(), (vec![], Some(Type::Str)));
+        type_info.functions.insert(
+            "io::println".to_string(),
+            (vec![(Type::Str, ArgKind::Value)], None),
+        );
 
         type_info.functions.insert(
             "str::len".to_string(),
-            (vec![(Type::Ref(Box::new(Type::Str), false), ArgKind::Ref)], Some(Type::I32)),
+            (
+                vec![(Type::Ref(Box::new(Type::Str), false), ArgKind::Ref)],
+                Some(Type::I32),
+            ),
         );
         type_info.functions.insert(
             "str::contains".to_string(),
             (
-                vec![(Type::Ref(Box::new(Type::Str), false), ArgKind::Ref), (Type::Str, ArgKind::Value)],
+                vec![
+                    (Type::Ref(Box::new(Type::Str), false), ArgKind::Ref),
+                    (Type::Str, ArgKind::Value),
+                ],
                 Some(Type::Bool),
             ),
         );
         type_info.functions.insert(
             "str::split".to_string(),
             (
-                vec![(Type::Ref(Box::new(Type::Str), false), ArgKind::Ref), (Type::Str, ArgKind::Value)],
-                Some(Type::Custom(
-                    "std::vec::Vector<>".into(),
-                    vec![Type::String],
-                )),
+                vec![
+                    (Type::Ref(Box::new(Type::Str), false), ArgKind::Ref),
+                    (Type::Str, ArgKind::Value),
+                ],
+                Some(Type::Custom("std::vec::Vector<>".into(), vec![Type::Str])),
             ),
         );
 
-        type_info.functions
-            .insert("string::new".to_string(), (vec![], Some(Type::String)));
+        type_info
+            .functions
+            .insert("string::new".to_string(), (vec![], Some(Type::Str)));
         type_info.functions.insert(
             "string::len".to_string(),
             (
-                vec![(Type::Ref(Box::new(Type::String), false), ArgKind::Ref)],
+                vec![(Type::Ref(Box::new(Type::Str), false), ArgKind::Ref)],
                 Some(Type::I32),
             ),
         );
         type_info.functions.insert(
             "string::contains".to_string(),
             (
-                vec![(Type::Ref(Box::new(Type::String), false), ArgKind::Ref), (Type::Str, ArgKind::Value)],
+                vec![
+                    (Type::Ref(Box::new(Type::Str), false), ArgKind::Ref),
+                    (Type::Str, ArgKind::Value),
+                ],
                 Some(Type::Bool),
             ),
         );
         type_info.functions.insert(
             "string::split".to_string(),
             (
-                vec![(Type::Ref(Box::new(Type::String), false), ArgKind::Ref), (Type::Str, ArgKind::Value)],
-                Some(Type::Custom(
-                    "std::vec::Vector<>".into(),
-                    vec![Type::String],
-                )),
+                vec![
+                    (Type::Ref(Box::new(Type::Str), false), ArgKind::Ref),
+                    (Type::Str, ArgKind::Value),
+                ],
+                Some(Type::Custom("std::vec::Vector<>".into(), vec![Type::Str])),
             ),
         );
         type_info.functions.insert(
             "string::to_str".to_string(),
             (
-                vec![(Type::Ref(Box::new(Type::String), false), ArgKind::Ref)],
+                vec![(Type::Ref(Box::new(Type::Str), false), ArgKind::Ref)],
                 Some(Type::Str),
             ),
         );
         type_info.functions.insert(
             "i32::to_string".to_string(),
-            (vec![(Type::Ref(Box::new(Type::I32), false), ArgKind::Ref)], Some(Type::String)),
+            (
+                vec![(Type::Ref(Box::new(Type::I32), false), ArgKind::Ref)],
+                Some(Type::Str),
+            ),
         );
         type_info.functions.insert(
             "i64::to_string".to_string(),
-            (vec![(Type::Ref(Box::new(Type::I64), false), ArgKind::Ref)], Some(Type::String)),
+            (
+                vec![(Type::Ref(Box::new(Type::I64), false), ArgKind::Ref)],
+                Some(Type::Str),
+            ),
         );
         type_info.functions.insert(
             "f32::to_string".to_string(),
-            (vec![(Type::Ref(Box::new(Type::F32), false), ArgKind::Ref)], Some(Type::String)),
+            (
+                vec![(Type::Ref(Box::new(Type::F32), false), ArgKind::Ref)],
+                Some(Type::Str),
+            ),
         );
         type_info.functions.insert(
             "f64::to_string".to_string(),
-            (vec![(Type::Ref(Box::new(Type::F64), false), ArgKind::Ref)], Some(Type::String)),
+            (
+                vec![(Type::Ref(Box::new(Type::F64), false), ArgKind::Ref)],
+                Some(Type::Str),
+            ),
         );
         type_info.functions.insert(
             "f32::powi".to_string(),
             (
-                vec![(Type::Ref(Box::new(Type::F32), false), ArgKind::Ref), (Type::I32, ArgKind::Value)],
+                vec![
+                    (Type::Ref(Box::new(Type::F32), false), ArgKind::Ref),
+                    (Type::I32, ArgKind::Value),
+                ],
                 Some(Type::F32),
             ),
         );
         type_info.functions.insert(
             "f32::sqrt".to_string(),
-            (vec![(Type::Ref(Box::new(Type::F32), false), ArgKind::Ref)], Some(Type::F32)),
+            (
+                vec![(Type::Ref(Box::new(Type::F32), false), ArgKind::Ref)],
+                Some(Type::F32),
+            ),
         );
 
         type_info.functions.insert(
+            "str::append".to_string(),
+            (
+                vec![
+                    (Type::Ref(Box::new(Type::Str), true), ArgKind::MutRef),
+                    (Type::Str, ArgKind::Value),
+                ],
+                None,
+            ),
+        );
+        type_info.functions.insert(
             "string::append".to_string(),
             (
-                vec![(Type::Ref(Box::new(Type::String), true), ArgKind::MutRef), (Type::Str, ArgKind::Value)],
+                vec![
+                    (Type::Ref(Box::new(Type::Str), true), ArgKind::MutRef),
+                    (Type::Str, ArgKind::Value),
+                ],
                 None,
+            ),
+        );
+
+        type_info
+            .functions
+            .insert("Array::len".to_string(), (vec![], Some(Type::I32)));
+        type_info.functions.insert(
+            "vec::Vector<>::push".to_string(),
+            (
+                vec![(
+                    Type::Ref(Box::new(Type::Generic("T".into())), false),
+                    ArgKind::Ref,
+                )],
+                None,
+            ),
+        );
+        type_info.functions.insert(
+            "vec::Vector<>::pop".to_string(),
+            (
+                vec![],
+                Some(Type::Custom(
+                    "option::Option<>".into(),
+                    vec![Type::Generic("T".into())],
+                )),
+            ),
+        );
+        type_info.functions.insert(
+            "vec::Vector<>::get".to_string(),
+            (
+                vec![(Type::Ref(Box::new(Type::I32), false), ArgKind::Ref)],
+                Some(Type::Generic("T".into())),
+            ),
+        );
+        type_info
+            .functions
+            .insert("vec::Vector<>::len".to_string(), (vec![], Some(Type::I32)));
+        // Register Option enum
+        let mut option_variants = HashMap::new();
+        option_variants.insert("Some".to_string(), vec![Type::Generic("T".into())]);
+        option_variants.insert("None".to_string(), vec![]);
+        type_info.enums.insert(
+            "option::Option<>".to_string(),
+            (
+                option_variants,
+                vec![("T".into(), vec![])],
+                vec!["derive(Clone, Debug, Default)".to_string()],
+            ),
+        );
+        type_info
+            .aliases
+            .insert("Option".to_string(), "option::Option".to_string());
+        type_info
+            .aliases
+            .insert("Vec".to_string(), "vec::Vector".to_string());
+        type_info
+            .aliases
+            .insert("Vector".to_string(), "vec::Vector".to_string());
+
+        type_info.functions.insert(
+            "vec::Vector<>::new".to_string(),
+            (
+                vec![],
+                Some(Type::Custom(
+                    "vec::Vector<>".into(),
+                    vec![Type::Generic("T".into())],
+                )),
+            ),
+        );
+
+        type_info.functions.insert(
+            "option::Option<>::Some".to_string(),
+            (
+                vec![(Type::Generic("T".into()), ArgKind::Value)],
+                Some(Type::Custom(
+                    "option::Option<>".into(),
+                    vec![Type::Generic("T".into())],
+                )),
+            ),
+        );
+        type_info.functions.insert(
+            "option::Option<>::None".to_string(),
+            (
+                vec![],
+                Some(Type::Custom(
+                    "option::Option<>".into(),
+                    vec![Type::Generic("T".into())],
+                )),
             ),
         );
 
@@ -169,96 +317,53 @@ impl TypeInfo {
             Type::RawPtr(inner, mutable) => {
                 Type::RawPtr(Box::new(self.resolve_type(inner, prefix)), *mutable)
             }
-            Type::Ref(inner, mutable) => Type::Ref(Box::new(self.resolve_type(inner, prefix)), *mutable),
-            Type::Managed(inner) => Type::Managed(Box::new(self.resolve_type(inner, prefix))),
-            Type::ThreadSafe(inner) => Type::ThreadSafe(Box::new(self.resolve_type(inner, prefix))),
-            Type::WeakManaged(inner) => Type::WeakManaged(Box::new(self.resolve_type(inner, prefix))),
-            Type::WeakThreadSafe(inner) => Type::WeakThreadSafe(Box::new(self.resolve_type(inner, prefix))),
-            Type::Array(inner, size) => Type::Array(Box::new(self.resolve_type(inner, prefix)), *size),
-            Type::SelfType => {
-                // This logic is currently in mod.rs for `analyze_function`, but `resolve_type` is called *during* that analysis.
-                // It should probably live with the symbol table, which will be in `analysis.rs`.
-                // For now, let's assume it will be handled by `analysis.rs` context.
-                // Returning Any as a placeholder.
-                Type::Any 
+            Type::Ref(inner, mutable) => {
+                Type::Ref(Box::new(self.resolve_type(inner, prefix)), *mutable)
             }
-            Type::Custom(name, generics) => {
-                if self.generic_params.contains_key(name) {
-                    Type::Generic(name.clone())
-                } else if name == "String" {
-                    Type::String
-                } else if name == "File" {
-                    Type::File
-                } else if name == "any" {
-                    Type::Any
-                } else {
-                    let resolved_generics: Vec<_> =
-                        generics.iter().map(|g| self.resolve_type(g, prefix)).collect();
-
-                    let mut name_to_lookup = name.clone();
-                    // NOTE: Logic for 'Self' and 'self' needs context from symbol table (current_obj),
-                    // which belongs in analysis.rs. This part needs to be carefully managed.
-                    if name == "Self" || name == "self" {
-                        // Placeholder: This requires symbol table context (current_obj)
-                        // This will be resolved in analysis.rs
-                        if !resolved_generics.is_empty() {
-                             name_to_lookup = format!("{}<>", name_to_lookup); // Add <> if generics are resolved
-                        }
-                    } else if name.contains("::") {
-                        let parts: Vec<&str> = name.split("::").collect();
-                        if let Some(alias) = self.aliases.get(parts[0]) {
-                            name_to_lookup = format!("{}::{}", alias, parts[1..].join("::"));
-                        }
-                    } else if let Some(alias) = self.aliases.get(name) {
-                        name_to_lookup = alias.clone();
-                    } else {
-                        if !prefix.is_empty() {
-                            let prefixed = format!("{}::{}", prefix, name); 
-                            if self.objects.contains_key(&prefixed)
-                                || self.objects.contains_key(&format!("{}<>", prefixed))
-                                || self.enums.contains_key(&prefixed)
-                                || self.enums.contains_key(&format!("{}<>", prefixed))
-                                || self.traits.contains_key(&prefixed)
-                                || self.traits.contains_key(&format!("{}<>", prefixed))
-                            {
-                                name_to_lookup = prefixed;
-                            }
-                        }
-                    }
-
-                    if !resolved_generics.is_empty() && !name_to_lookup.ends_with("<>") {
-                        let generic_name = format!("{}<>", name_to_lookup);
-                        Type::Custom(generic_name, resolved_generics)
-                    } else {
-                        Type::Custom(name_to_lookup, resolved_generics)
-                    }
-                }
+            Type::Managed(inner) => Type::Managed(Box::new(self.resolve_type(inner, prefix))),
+            // Resolve Owned too 
+            Type::Owned(inner) => Type::Owned(Box::new(self.resolve_type(inner, prefix))),
+            Type::ThreadSafe(inner) => Type::ThreadSafe(Box::new(self.resolve_type(inner, prefix))),
+            Type::WeakManaged(inner) => {
+                Type::WeakManaged(Box::new(self.resolve_type(inner, prefix)))
+            }
+            Type::WeakThreadSafe(inner) => {
+                Type::WeakThreadSafe(Box::new(self.resolve_type(inner, prefix)))
             }
             Type::Result(ok, err) => Type::Result(
                 Box::new(self.resolve_type(ok, prefix)),
                 Box::new(self.resolve_type(err, prefix)),
             ),
+            Type::Tuple(types) => {
+                Type::Tuple(types.iter().map(|t| self.resolve_type(t, prefix)).collect())
+            }
+            Type::Array(inner, size) => {
+                Type::Array(Box::new(self.resolve_type(inner, prefix)), *size)
+            }
+            Type::Custom(name, generics) => {
+                if name == "String" || name == "sr_string" || name == "string" {
+                    return Type::Str;
+                }
+                let mut resolved_name = self.aliases.get(name).cloned().unwrap_or_else(|| {
+                    if !name.contains("::") && !prefix.is_empty() {
+                        format!("{}::{}", prefix, name)
+                    } else {
+                        name.clone()
+                    }
+                });
+                if !generics.is_empty() && !resolved_name.contains('<') {
+                    resolved_name = format!("{}<>", resolved_name);
+                }
+                let resolved_generics = generics
+                    .iter()
+                    .map(|g| self.resolve_type(g, prefix))
+                    .collect();
+                Type::Custom(resolved_name, resolved_generics)
+            }
             _ => ty.clone(),
         }
     }
-    
-    // Placeholder for path resolution logic that might need context from analysis.rs
-    pub fn resolve_path(&self, path: &[PathPart]) -> String {
-        // This is a simplified version. The full logic involves checking aliases,
-        // current prefix, and known types. This will need to be integrated with
-        // analysis.rs context if it depends on `current_prefix` or `aliases` that
-        // might be managed differently.
-        let mut full_path = String::new();
-        for (i, part) in path.iter().enumerate() {
-            if i > 0 {
-                full_path.push_str("::");
-            }
-            full_path.push_str(&part.name);
-        }
-        full_path
-    }
 
-    // Logic to collect type declarations (objects, enums, traits, functions, impls, uses)
     pub fn collect_decls(&mut self, decls: &[Decl], prefix: &str) -> Result<(), CompilerError> {
         for decl in decls {
             match decl {
@@ -280,8 +385,10 @@ impl TypeInfo {
                     for f in &obj.fields {
                         fields.insert(f.name.clone(), self.resolve_type(&f.ty, prefix));
                     }
-                    self.objects
-                        .insert(full_name, (fields, obj.generics.clone()));
+                    self.objects.insert(
+                        full_name,
+                        (fields, obj.generics.clone(), obj.attributes.clone()),
+                    );
                 }
                 Decl::Enum(enm) | Decl::ExternEnum(enm) => {
                     let mut full_name = if prefix.is_empty() {
@@ -300,8 +407,10 @@ impl TypeInfo {
                     for v in &enm.variants {
                         variants.insert(v.name.clone(), v.types.clone());
                     }
-                    self.enums
-                        .insert(full_name, (variants, enm.generics.clone()));
+                    self.enums.insert(
+                        full_name,
+                        (variants, enm.generics.clone(), enm.attributes.clone()),
+                    );
                 }
                 Decl::Trait(tr) | Decl::ExternTrait(tr) => {
                     let mut full_name = if prefix.is_empty() {
@@ -364,7 +473,11 @@ impl TypeInfo {
                     }
 
                     // Store function signatures. Generic parameters are resolved later in analysis.
-                    // For now, we just record them.
+                    let old_gens = self.generic_params.clone();
+                    for (name, bounds) in &func.generics {
+                        self.generic_params.insert(name.clone(), bounds.clone());
+                    }
+
                     let mut resolved_params = Vec::new();
                     for p in &func.params {
                         let ty = self.resolve_type(&p.ty, prefix);
@@ -376,10 +489,27 @@ impl TypeInfo {
                         };
                         resolved_params.push((ty, kind));
                     }
-                    let resolved_ret = func.return_type.as_ref().map(|t| self.resolve_type(t, prefix));
+                    let resolved_ret = func
+                        .return_type
+                        .as_ref()
+                        .map(|t| self.resolve_type(t, prefix));
 
-                    self.functions.insert(final_name.clone(), (resolved_params, resolved_ret));
+                    self.functions
+                        .insert(final_name.clone(), (resolved_params, resolved_ret));
+                    self.generic_params = old_gens;
                     //println!("DEBUG collect_decls added function: {}", final_name);
+                }
+                Decl::Const(c) => {
+                    let full_name = if prefix.is_empty() {
+                        c.name.clone()
+                    } else {
+                        format!("{}::{}", prefix, c.name)
+                    };
+                    let ty =
+                        c.ty.as_ref()
+                            .map(|t| self.resolve_type(t, prefix))
+                            .unwrap_or(Type::Any);
+                    self.constants.insert(full_name, ty);
                 }
                 Decl::Module(name, inner) => {
                     let new_prefix = if prefix.is_empty() {
@@ -395,21 +525,29 @@ impl TypeInfo {
                     if new_prefix.contains("::") {
                         let parts: Vec<&str> = new_prefix.split("::").collect();
                         let last_part = parts.last().unwrap();
-                        self.aliases.insert(last_part.to_string(), new_prefix.clone());
+                        if *last_part != "mod" {
+                            self.aliases
+                                .insert(last_part.to_string(), new_prefix.clone());
+                        }
                     }
                     self.collect_decls(inner, &new_prefix)?;
                 }
                 Decl::Use(u) => {
-                    if u.is_crate {
+                    if u.is_rust {
                         if let Some(crate_name) = u.path.first() {
                             self.phantom_types.insert(crate_name.clone());
                         }
                     }
                     if !u.path.is_empty() {
-                        let full_path = u.path.join("::");
+                        let mut full_path = u.path.join("::");
+                        if full_path.starts_with("stext::") {
+                            full_path = full_path.strip_prefix("stext::").unwrap().to_string();
+                        }
                         let last_part = u.path.last().unwrap();
-                        // Use alias for the last part of the path
-                        self.aliases.insert(last_part.clone(), full_path);
+                        if last_part != "mod" {
+                            // Use alias for the last part of the path
+                            self.aliases.insert(last_part.clone(), full_path);
+                        }
                     }
                     if u.is_wildcard {
                         self.has_wildcard_phantom = true;
@@ -421,7 +559,6 @@ impl TypeInfo {
         Ok(())
     }
 
-    // Logic to collect information from implementation blocks
     pub fn collect_impls(&mut self, decls: &[Decl], prefix: &str) -> Result<(), CompilerError> {
         for decl in decls {
             match decl {
@@ -437,48 +574,60 @@ impl TypeInfo {
                     };
 
                     // Handle generic impl targets (e.g., `impl<T> MyObj<T>`)
-                    // This assumes `MyObj<>` is already registered in `self.objects` or `self.enums`
                     if !imp.generics.is_empty() && !full_target.ends_with("<>") {
                         full_target = format!("{}<>", full_target);
                     }
 
-                    // Store generic parameters of the impl block and its functions
-                    let old_gens = self.generic_params.clone(); // Save current generic params
+                    let is_trait_impl = imp.trait_name.is_some();
+
+                    let old_gens = self.generic_params.clone();
                     for (name, bounds) in &imp.generics {
                         self.generic_params.insert(name.clone(), bounds.clone());
                     }
 
                     for func in &imp.functions {
-                        // Store method signatures, namespaced by the target type
-                        let method_full_name = format!("{}::{}", full_target, func.name);
-                        let sig_params: Vec<_> = func
-                            .params
-                            .iter()
-                            .map(|p| {
-                                let ty = if p.name == "self" {
-                                    // Resolve self type
-                                    if full_target.contains('<') {
+                        let method_full_name = if is_trait_impl {
+                            let mut tr_name = imp.trait_name.as_ref().unwrap().clone();
+                            if !tr_name.contains("::") && !prefix.is_empty() {
+                                tr_name = format!("{}::{}", prefix, tr_name);
+                            }
+                            format!("{}<>::{}", full_target, func.name)
+                        } else {
+                            format!("{}::{}", full_target, func.name)
+                        };
+
+                        let mut sig_params = Vec::new();
+                        for p in &func.params {
+                            let ty = if p.name == "self" {
+                                if full_target.contains('<') {
+                                    if full_target.ends_with("<>") {
+                                        Type::Custom(full_target.clone(), Vec::new())
+                                    } else {
                                         let parts: Vec<_> = full_target.split('<').collect();
                                         let name = parts[0].to_string();
-                                        Type::Custom(name, Vec::new()) // Simplified generics for now
-                                    } else {
-                                        Type::Custom(full_target.clone(), Vec::new())
+                                        Type::Custom(format!("{}<>", name), Vec::new())
                                     }
                                 } else {
-                                    self.resolve_type(&p.ty, prefix)
-                                };
-                                let kind = match &ty {
-                                    Type::Ref(_, true) => ArgKind::MutRef,
-                                    Type::Ref(_, false) => ArgKind::Ref,
-                                    _ if p.is_mutable => ArgKind::MutRef,
-                                    _ => ArgKind::Value,
-                                };
-                                (ty, kind)
-                            })
-                            .collect();
-                        let sig_ret = func.return_type.as_ref().map(|t| self.resolve_type(t, prefix));
+                                    Type::Custom(full_target.clone(), Vec::new())
+                                }
+                            } else {
+                                self.resolve_type(&p.ty, prefix)
+                            };
+                            let kind = match &ty {
+                                Type::Ref(_, true) => ArgKind::MutRef,
+                                Type::Ref(_, false) => ArgKind::Ref,
+                                _ if p.is_mutable => ArgKind::MutRef,
+                                _ => ArgKind::Value,
+                            };
+                            sig_params.push((ty, kind));
+                        }
+                        let sig_ret = func
+                            .return_type
+                            .as_ref()
+                            .map(|t| self.resolve_type(t, prefix));
                         //println!("DEBUG collect_impls added method: {}", method_full_name);
-                        self.functions.insert(method_full_name, (sig_params, sig_ret));
+                        self.functions
+                            .insert(method_full_name, (sig_params, sig_ret));
 
                         // Also store generic params for functions within the impl block
                         let old_func_gens = self.generic_params.clone();
@@ -509,16 +658,185 @@ impl TypeInfo {
         Ok(())
     }
 
+    pub fn resolve_method_call_signature(
+        &mut self,
+        self_ty: &Type,
+        method_name: &str,
+        num_args: usize,
+        span: Span,
+    ) -> Result<(Option<Type>, Vec<Type>, Vec<ArgKind>), CompilerError> {
+        let (full_self_ty_name, self_generics) = match self_ty {
+            Type::Custom(name, generics) => (name.clone(), generics.clone()),
+            _ => {
+                return Err(CompilerError::from_rich(chumsky::prelude::Rich::custom(
+                    span,
+                    format!(
+                        "Method '{}' called on non-object type '{:?}'",
+                        method_name, self_ty
+                    ),
+                )));
+            }
+        };
+
+        // Try to find method directly on self_ty
+        let base_method_name = format!("{}::{}", full_self_ty_name, method_name);
+        if let Some((param_types_kinds, return_type)) = self.functions.get(&base_method_name) {
+            if param_types_kinds.len() != num_args {
+                return Err(CompilerError::from_rich(chumsky::prelude::Rich::custom(
+                    span,
+                    format!(
+                        "Method '{}' expects {} arguments, but received {}",
+                        base_method_name,
+                        param_types_kinds.len(),
+                        num_args
+                    ),
+                )));
+            }
+            let resolved_param_types: Vec<Type> =
+                param_types_kinds.iter().map(|(ty, _)| ty.clone()).collect();
+            let resolved_arg_kinds: Vec<ArgKind> =
+                param_types_kinds.iter().map(|(_, kind)| *kind).collect();
+            return Ok((
+                return_type.clone(),
+                resolved_param_types,
+                resolved_arg_kinds,
+            ));
+        }
+
+        // If not found, try to resolve methods for generic types (like Option<T> or Vec<T>)
+        let (base_type_name, type_params) = if full_self_ty_name.contains('<') {
+            let parts: Vec<&str> = full_self_ty_name.split('<').collect();
+            (parts[0].to_string(), self_generics)
+        } else {
+            (full_self_ty_name.clone(), Vec::new())
+        };
+
+        let generic_method_name = format!("{}<>::{}", base_type_name, method_name);
+        if let Some((param_types_kinds, return_type)) = self.functions.get(&generic_method_name) {
+            if param_types_kinds.len() != num_args {
+                return Err(CompilerError::from_rich(chumsky::prelude::Rich::custom(
+                    span,
+                    format!(
+                        "Method '{}' expects {} arguments, but received {}",
+                        generic_method_name,
+                        param_types_kinds.len(),
+                        num_args
+                    ),
+                )));
+            }
+
+            let mut resolved_param_types = Vec::with_capacity(param_types_kinds.len());
+            let mut resolved_arg_kinds = Vec::with_capacity(param_types_kinds.len());
+            let mut type_map = HashMap::new();
+
+            // Populate type_map for generic substitutions
+            if let Type::Custom(_, current_generics) = self_ty {
+                if let Some((_, generic_defs, _)) = self.objects.get(&base_type_name) {
+                    for (i, (gen_name, _)) in generic_defs.iter().enumerate() {
+                        if let Some(concrete_ty) = current_generics.get(i) {
+                            type_map.insert(gen_name.clone(), concrete_ty.clone());
+                        }
+                    }
+                } else if let Some((_, generic_defs, _)) = self.enums.get(&base_type_name) {
+                    for (i, (gen_name, _)) in generic_defs.iter().enumerate() {
+                        if let Some(concrete_ty) = current_generics.get(i) {
+                            type_map.insert(gen_name.clone(), concrete_ty.clone());
+                        }
+                    }
+                }
+            }
+
+            for (param_ty, arg_kind) in param_types_kinds {
+                let substituted_ty = self.substitute_generics(param_ty, &type_map);
+                resolved_param_types.push(substituted_ty);
+                resolved_arg_kinds.push(*arg_kind);
+            }
+
+            let substituted_return_type = return_type
+                .as_ref()
+                .map(|ty| self.substitute_generics(ty, &type_map));
+
+            return Ok((
+                substituted_return_type,
+                resolved_param_types,
+                resolved_arg_kinds,
+            ));
+        }
+
+        // Method not found
+        Err(CompilerError::from_rich(chumsky::prelude::Rich::custom(
+            span,
+            format!(
+                "Method '{}' not found for type '{:?}'",
+                method_name, self_ty
+            ),
+        )))
+    }
+
+    fn substitute_generics(&self, ty: &Type, type_map: &HashMap<String, Type>) -> Type {
+        match ty {
+            Type::Generic(name) => type_map.get(name).cloned().unwrap_or_else(|| ty.clone()),
+            Type::Custom(name, generics) => {
+                let substituted_generics = generics
+                    .iter()
+                    .map(|g| self.substitute_generics(g, type_map))
+                    .collect();
+                Type::Custom(name.clone(), substituted_generics)
+            }
+            Type::Ref(inner, mutable) => Type::Ref(
+                Box::new(self.substitute_generics(inner, type_map)),
+                *mutable,
+            ),
+            Type::BoxPtr(inner) => {
+                Type::BoxPtr(Box::new(self.substitute_generics(inner, type_map)))
+            }
+            Type::RawPtr(inner, mutable) => Type::RawPtr(
+                Box::new(self.substitute_generics(inner, type_map)),
+                *mutable,
+            ),
+            Type::Managed(inner) => {
+                Type::Managed(Box::new(self.substitute_generics(inner, type_map)))
+            }
+            Type::ThreadSafe(inner) => {
+                Type::ThreadSafe(Box::new(self.substitute_generics(inner, type_map)))
+            }
+            Type::WeakManaged(inner) => {
+                Type::WeakManaged(Box::new(self.substitute_generics(inner, type_map)))
+            }
+            Type::WeakThreadSafe(inner) => {
+                Type::WeakThreadSafe(Box::new(self.substitute_generics(inner, type_map)))
+            }
+            Type::Result(ok, err) => Type::Result(
+                Box::new(self.substitute_generics(ok, type_map)),
+                Box::new(self.substitute_generics(err, type_map)),
+            ),
+            Type::Tuple(types) => Type::Tuple(
+                types
+                    .iter()
+                    .map(|t| self.substitute_generics(t, type_map))
+                    .collect(),
+            ),
+            Type::Array(inner, size) => {
+                Type::Array(Box::new(self.substitute_generics(inner, type_map)), *size)
+            }
+            _ => ty.clone(),
+        }
+    }
+
     pub fn is_phantom_type(&self, name: &str) -> bool {
         if self.has_wildcard_phantom {
             return true;
         }
-        if self.phantom_types.contains(name) {
+
+        // Resolve alias if it exists
+        let actual_name = self.aliases.get(name).map(|s| s.as_str()).unwrap_or(name);
+
+        if self.phantom_types.contains(actual_name) {
             return true;
         }
         // Check if the name starts with any of the known phantom types followed by ::
         for phantom_prefix in &self.phantom_types {
-            if name.starts_with(&format!("{}::", phantom_prefix)) {
+            if actual_name.starts_with(&format!("{}::", phantom_prefix)) {
                 return true;
             }
         }

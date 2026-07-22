@@ -89,6 +89,8 @@ pub(crate) fn generate_solar_std(has_macroquad: bool) -> TokenStream {
         fn solar_len(&self) -> i32;
         fn solar_contains(&self, s: impl AsRef<str>) -> bool;
         fn solar_split(&self, s: impl AsRef<str>) -> Vec<String>;
+        fn solar_append(&mut self, s: impl AsRef<str>) { panic!("append not supported on this type"); }
+        fn solar_lines(&self) -> Vec<String>;
     }
 
     impl SolarStr for str {
@@ -98,68 +100,102 @@ pub(crate) fn generate_solar_std(has_macroquad: bool) -> TokenStream {
         fn solar_len(&self) -> i32 { self.len() as i32 }
         fn solar_contains(&self, s: impl AsRef<str>) -> bool { self.contains(s.as_ref()) }
         fn solar_split(&self, s: impl AsRef<str>) -> Vec<String> { self.split(s.as_ref()).map(|x| x.to_owned()).collect() }
-    }
-
-    pub trait SolarString {
-        fn solar_append(&mut self, s: impl AsRef<str>);
-        fn solar_len(&self) -> i32;
-        fn solar_contains(&self, s: impl AsRef<str>) -> bool;
-        fn solar_as_str(&self) -> &str;
-        fn solar_to_str(&self) -> &str;
-        fn solar_to_string(&self) -> String;
-        fn solar_lines(&self) -> Vec<String>;
-        fn solar_split(&self, s: impl AsRef<str>) -> Vec<String>;
-    }
-
-    impl SolarString for String {
-        fn solar_append(&mut self, s: impl AsRef<str>) { self.push_str(s.as_ref()); }
-        fn solar_len(&self) -> i32 { self.len() as i32 }
-        fn solar_contains(&self, s: impl AsRef<str>) -> bool { self.contains(s.as_ref()) }
-        fn solar_as_str(&self) -> &str { self.as_str() }
-        fn solar_to_str(&self) -> &str { self.as_str() }
-        fn solar_to_string(&self) -> String { self.clone() }
         fn solar_lines(&self) -> Vec<String> { self.lines().map(|x| x.to_owned()).collect() }
-        fn solar_split(&self, s: impl AsRef<str>) -> Vec<String> { self.split(s.as_ref()).map(|x| x.to_owned()).collect() }
     }
-    
-    // Explicitly add to_str wrapper
-    impl crate::SolarStr for String {
+
+    impl SolarStr for String {
         fn to_owned_string(&self) -> String { self.clone() }
         fn solar_to_string(&self) -> String { self.clone() }
         fn solar_to_str(&self) -> &str { self.as_str() }
         fn solar_len(&self) -> i32 { self.len() as i32 }
         fn solar_contains(&self, s: impl AsRef<str>) -> bool { self.contains(s.as_ref()) }
         fn solar_split(&self, s: impl AsRef<str>) -> Vec<String> { self.split(s.as_ref()).map(|x| x.to_owned()).collect() }
+        fn solar_append(&mut self, s: impl AsRef<str>) { self.push_str(s.as_ref()); }
+        fn solar_lines(&self) -> Vec<String> { self.lines().map(|x| x.to_owned()).collect() }
     }
 
     pub trait SolarVec<T> {
         fn solar_len(&self) -> i32;
-        fn solar_get(&self, i: &i32) -> T;
+        fn solar_get(&self, i: &i32) -> Option<T>;
+        fn solar_push(&mut self, item: &T);
+        fn solar_pop(&mut self) -> Option<T>;
     }
 
     impl<T: Clone> SolarVec<T> for Vec<T> {
-        fn solar_len(&self) -> i32 { self.len() as i32 }
-        fn solar_get(&self, i: &i32) -> T { self[*i as usize].clone() }
+        fn solar_len(&self) -> i32 {
+            self.len() as i32
+        }
+        fn solar_get(&self, i: &i32) -> Option<T> {
+            self.get(*i as usize).cloned()
+        }
+        fn solar_push(&mut self, item: &T) {
+            self.push(item.clone());
+        }
+        fn solar_pop(&mut self) -> Option<T> {
+            self.pop()
+        }
+    }
+
+    impl<T: Clone, const N: usize> SolarVec<T> for [T; N] {
+        fn solar_len(&self) -> i32 { N as i32 }
+        fn solar_get(&self, i: &i32) -> Option<T> { self.get(*i as usize).cloned() }
+        fn solar_push(&mut self, _item: &T) { panic!("push not supported on fixed-size array"); }
+        fn solar_pop(&mut self) -> Option<T> { panic!("pop not supported on fixed-size array"); }
     }
 
     pub trait SolarIndex<Idx> {
         type Output;
-        fn solar_index(&self, i: Idx) -> &Self::Output;
+        fn solar_index(&self, i: &Idx) -> &Self::Output;
+    }
+
+    pub trait SolarIndexMut<Idx> {
+        type Output;
+        fn solar_index_mut(&mut self, i: &Idx, val: Self::Output);
     }
 
     impl<T> SolarIndex<i32> for Vec<T> {
         type Output = T;
-        fn solar_index(&self, i: i32) -> &T { &self[i as usize] }
+        fn solar_index(&self, i: &i32) -> &T { &self[*i as usize] }
+    }
+
+    impl<T> SolarIndexMut<i32> for Vec<T> {
+        type Output = T;
+        fn solar_index_mut(&mut self, i: &i32, val: T) { self[*i as usize] = val; }
+    }
+
+    impl<T, const N: usize> SolarIndex<i32> for [T; N] {
+        type Output = T;
+        fn solar_index(&self, i: &i32) -> &T { &self[*i as usize] }
+    }
+
+    impl<T, const N: usize> SolarIndexMut<i32> for [T; N] {
+        type Output = T;
+        fn solar_index_mut(&mut self, i: &i32, val: T) { self[*i as usize] = val; }
+    }
+
+    impl<T> SolarIndex<i32> for [T] {
+        type Output = T;
+        fn solar_index(&self, i: &i32) -> &T { &self[*i as usize] }
+    }
+
+    impl<T> SolarIndexMut<i32> for [T] {
+        type Output = T;
+        fn solar_index_mut(&mut self, i: &i32, val: T) { self[*i as usize] = val; }
     }
 
     impl<T> SolarIndex<i32> for *mut T {
         type Output = T;
-        fn solar_index(&self, i: i32) -> &T { unsafe { &*self.add(i as usize) } }
+        fn solar_index(&self, i: &i32) -> &T { unsafe { &*self.add(*i as usize) } }
+    }
+
+    impl<T> SolarIndexMut<i32> for *mut T {
+        type Output = T;
+        fn solar_index_mut(&mut self, i: &i32, val: T) { unsafe { *self.add(*i as usize) = val; } }
     }
 
     impl<T> SolarIndex<i32> for *const T {
         type Output = T;
-        fn solar_index(&self, i: i32) -> &T { unsafe { &*self.add(i as usize) } }
+        fn solar_index(&self, i: &i32) -> &T { unsafe { &*self.add(*i as usize) } }
     }
 
     pub trait SolarAdd<Rhs = Self> {
@@ -357,18 +393,29 @@ pub(crate) fn generate_solar_std(has_macroquad: bool) -> TokenStream {
     // We'll just implement for primitive-ish types that need it.
     impl crate::SolarAsVal<i32> for i32 { fn as_val(&self) -> i32 { *self } }
     impl crate::SolarAsVal<i32> for &i32 { fn as_val(&self) -> i32 { **self } }
+    impl crate::SolarAsVal<i64> for i64 { fn as_val(&self) -> i64 { *self } }
+    impl crate::SolarAsVal<i64> for &i64 { fn as_val(&self) -> i64 { **self } }
     impl crate::SolarAsVal<f32> for f32 { fn as_val(&self) -> f32 { *self } }
     impl crate::SolarAsVal<f32> for &f32 { fn as_val(&self) -> f32 { **self } }
     impl crate::SolarAsVal<f64> for f64 { fn as_val(&self) -> f64 { *self } }
     impl crate::SolarAsVal<f64> for &f64 { fn as_val(&self) -> f64 { **self } }
     impl crate::SolarAsVal<bool> for bool { fn as_val(&self) -> bool { *self } }
     impl crate::SolarAsVal<bool> for &bool { fn as_val(&self) -> bool { **self } }
+    impl crate::SolarAsVal<usize> for usize { fn as_val(&self) -> usize { *self } }
+    impl crate::SolarAsVal<usize> for &usize { fn as_val(&self) -> usize { **self } }
+
+    impl<T: Clone + Copy, const N: usize> crate::SolarAsVal<[T; N]> for [T; N] {
+        fn as_val(&self) -> [T; N] { *self }
+    }
+    impl<T: Clone + Copy, const N: usize> crate::SolarAsVal<[T; N]> for &[T; N] {
+        fn as_val(&self) -> [T; N] { **self }
+    }
 
     impl crate::SolarAsVal<()> for () { fn as_val(&self) -> () { () } }
     impl crate::SolarAsVal<()> for &() { fn as_val(&self) -> () { **self } }
 
     };
-    
+
     let mut final_stream = stream;
     if has_macroquad {
         final_stream.extend(quote! {
@@ -376,6 +423,8 @@ pub(crate) fn generate_solar_std(has_macroquad: bool) -> TokenStream {
             impl crate::SolarAsVal<::macroquad::math::Vec2> for &::macroquad::math::Vec2 { fn as_val(&self) -> ::macroquad::math::Vec2 { **self } }
             impl crate::SolarAsVal<::macroquad::color::Color> for ::macroquad::color::Color { fn as_val(&self) -> ::macroquad::color::Color { *self } }
             impl crate::SolarAsVal<::macroquad::color::Color> for &::macroquad::color::Color { fn as_val(&self) -> ::macroquad::color::Color { **self } }
+            impl crate::SolarAsVal<::macroquad::math::Vec4> for ::macroquad::math::Vec4 { fn as_val(&self) -> ::macroquad::math::Vec4 { *self } }
+            impl crate::SolarAsVal<::macroquad::math::Vec4> for &::macroquad::math::Vec4 { fn as_val(&self) -> ::macroquad::math::Vec4 { **self } }
             impl crate::SolarAsVal<::macroquad::text::TextDimensions> for ::macroquad::text::TextDimensions { fn as_val(&self) -> ::macroquad::text::TextDimensions { *self } }
             impl crate::SolarAsVal<::macroquad::text::TextDimensions> for &::macroquad::text::TextDimensions { fn as_val(&self) -> ::macroquad::text::TextDimensions { **self } }
         });
@@ -384,6 +433,12 @@ pub(crate) fn generate_solar_std(has_macroquad: bool) -> TokenStream {
     final_stream.extend(quote! {
         impl<T: Clone> SolarAsVal<Vec<T>> for Vec<T> { fn as_val(&self) -> Vec<T> { self.clone() } }
     impl<T: Clone> SolarAsVal<Vec<T>> for &Vec<T> { fn as_val(&self) -> Vec<T> { (*self).clone() } }
+
+    impl<T: Clone> SolarAsVal<Option<T>> for Option<T> { fn as_val(&self) -> Option<T> { self.clone() } }
+    impl<T: Clone> SolarAsVal<Option<T>> for &Option<T> { fn as_val(&self) -> Option<T> { (*self).clone() } }
+
+    impl<T: Clone, E: Clone> SolarAsVal<Result<T, E>> for Result<T, E> { fn as_val(&self) -> Result<T, E> { self.clone() } }
+    impl<T: Clone, E: Clone> SolarAsVal<Result<T, E>> for &Result<T, E> { fn as_val(&self) -> Result<T, E> { (*self).clone() } }
 
 
     impl<T> crate::SolarAsVal<::std::rc::Rc<::std::cell::RefCell<T>>> for ::std::rc::Rc<::std::cell::RefCell<T>> {
@@ -499,6 +554,10 @@ pub(crate) fn generate_solar_std(has_macroquad: bool) -> TokenStream {
         pub fn new() -> String { String::new() }
     }
 
+    pub fn solar_typeof<T>(_: &T) -> &'static str {
+        ::std::any::type_name::<T>()
+    }
+
         pub mod sr_math {
         pub fn pi() -> f32 { ::std::f32::consts::PI }
         pub fn e() -> f32 { ::std::f32::consts::E }
@@ -508,5 +567,5 @@ pub(crate) fn generate_solar_std(has_macroquad: bool) -> TokenStream {
         pub fn tau64() -> f64 { ::std::f64::consts::TAU }
     }
         });
-        final_stream
+    final_stream
 }

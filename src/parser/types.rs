@@ -13,6 +13,9 @@ where
             just(Token::ParenOpen)
                 .then(just(Token::ParenClose))
                 .to(Type::Unit),
+            just(Token::Owned)
+                .ignore_then(ty.clone())
+                .map(|t| Type::Owned(Box::new(t))),
             just(Token::I32).to(Type::I32),
             just(Token::I64).to(Type::I64),
             just(Token::F32).to(Type::F32),
@@ -22,7 +25,7 @@ where
             just(Token::SelfKw).to(Type::SelfType),
             just(Token::Box)
                 .ignore_then(ty.clone().delimited_by(just(Token::Lt), just(Token::Gt)))
-                .map(|t| Type::BoxPtr(Box::new(t))),
+                .map(|t| Type::Owned(Box::new(t))),
             just(Token::ResultKw)
                 .ignore_then(
                     ty.clone()
@@ -70,7 +73,8 @@ where
                     .ignore_then(ty.clone())
                     .map(|inner| Type::Managed(Box::new(inner))),
             ))),
-        )).boxed();
+        ))
+        .boxed();
 
         let array = ty
             .clone()

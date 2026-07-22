@@ -1,0 +1,22 @@
+use crate::std::vec::Vec;
+
+fn ptype<T>(val: T):
+  println!(typeof!(val))
+
+obj Triangle:
+    a: i32
+    b: i32
+
+fn main():
+    var arr = [1, 2, 3]
+    ptype(arr)
+    
+    var mut v = Vec::new<i32>()
+    v.push(1)
+    ptype(v)
+
+    var t = Triangle { a: 1, b: 2 }
+    ptype(t)
+
+    var s = "hello"
+    ptype(s)

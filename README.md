@@ -26,3 +26,8 @@ async fn main():
         prelude::draw_triangle(t.v1, t.v2, t.v3, prelude::WHITE)
         prelude::next_frame().await
 ```
+
+### Goals
+[] - fast
+[x] - easy to write
+[x] - interops with rust

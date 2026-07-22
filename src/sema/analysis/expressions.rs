@@ -2,9 +2,6 @@
 
 use crate::ast::*;
 use crate::error::CompilerError;
-use crate::lexer::Span;
-use miette::SourceSpan;
-use std::collections::{HashMap, HashSet}; // Required for context if called standalone
 
 use super::AnalysisInfo;
 use crate::sema::types::TypeInfo;
@@ -15,10 +12,7 @@ pub struct ExpressionAnalyzer<'a> {
 }
 
 impl<'a> ExpressionAnalyzer<'a> {
-    pub fn new(
-        analysis_info: &'a mut AnalysisInfo,
-        type_info: &'a mut TypeInfo,
-    ) -> Self {
+    pub fn new(analysis_info: &'a mut AnalysisInfo, type_info: &'a mut TypeInfo) -> Self {
         Self {
             analysis_info,
             type_info,
@@ -26,8 +20,14 @@ impl<'a> ExpressionAnalyzer<'a> {
     }
 
     pub fn analyze_expr(&mut self, expr: &mut Expr) -> Result<Type, CompilerError> {
+        let ty = self.analyze_expr_internal(expr)?;
+        expr.ty = Some(ty.clone());
+        Ok(ty)
+    }
+
+    fn analyze_expr_internal(&mut self, expr: &mut Expr) -> Result<Type, CompilerError> {
         let span = expr.span;
-        let ty = match &mut expr.kind {
+        match &mut expr.kind {
             ExprKind::Unit => Ok(Type::Unit),
             ExprKind::Int(_) => Ok(Type::I32),
             ExprKind::Int64(_) => Ok(Type::I64),
@@ -36,7 +36,7 @@ impl<'a> ExpressionAnalyzer<'a> {
             ExprKind::Bool(_) => Ok(Type::Bool),
             ExprKind::String(_) => Ok(Type::Str), // Assuming String literals are of type Str
             ExprKind::Variable(path) => {
-                let name = self.analysis_info.path_to_string(path);
+                let name = self.analysis_info.path_to_string(path, self.type_info);
 
                 // Check for await promotion
                 let await_promoted =
@@ -53,11 +53,39 @@ impl<'a> ExpressionAnalyzer<'a> {
                 }
 
                 if let Some((ty, _)) = self.analysis_info.symbols.get(&name) {
+                    if await_promoted {
+                        // Return Managed type if promoted
+                        return Ok(Type::Managed(Box::new(ty.clone())));
+                    }
                     Ok(ty.clone())
-                } else if self.type_info.functions.contains_key(&name) {
-                    // Check if it's a function name
-                    Ok(Type::Any) // Function call without args is type Any for now
+                } else if let Some(ty) = self.type_info.constants.get(&name) {
+                    Ok(ty.clone())
                 } else {
+                    // Try lookup in enums for variants without payload
+                    if name.contains("::") {
+                        let parts: Vec<_> = name.split("::").collect();
+                        if parts.len() >= 2 {
+                            let (enum_parts, variant) = parts.split_at(parts.len() - 1);
+                            let mut enum_name = enum_parts.join("::");
+                            if !enum_name.contains('<') {
+                                enum_name = format!("{}<>", enum_name);
+                            }
+                            if let Some((variants, generics, _)) =
+                                self.type_info.enums.get(&enum_name)
+                            {
+                                if let Some(variant_params) = variants.get(variant[0]) {
+                                    if variant_params.is_empty() {
+                                        let mut resolved_generics = Vec::new();
+                                        for (gname, _) in generics {
+                                            resolved_generics.push(Type::Generic(gname.clone()));
+                                        }
+                                        return Ok(Type::Custom(enum_name, resolved_generics));
+                                    }
+                                }
+                            }
+                        }
+                    }
+
                     // Check if it's a phantom type
                     let is_phantom = path.iter().any(|p| self.type_info.is_phantom_type(&p.name));
                     if is_phantom || self.type_info.has_wildcard_phantom {
@@ -80,10 +108,10 @@ impl<'a> ExpressionAnalyzer<'a> {
 
                     // Special handling for string concatenation
                     if *op == BinaryOp::Add {
-                        let is_l_string = l_base == Type::String || l_base == Type::Str;
-                        let is_r_string = r_base == Type::String || r_base == Type::Str;
+                        let is_l_string = l_base == Type::Str;
+                        let is_r_string = r_base == Type::Str;
                         if is_l_string || is_r_string {
-                            return Ok(Type::String); // Result of string concat is String
+                            return Ok(Type::Str); // Result of string concat is Str
                         }
                     }
 
@@ -99,7 +127,17 @@ impl<'a> ExpressionAnalyzer<'a> {
                         | BinaryOp::GreaterThanOrEqual
                         | BinaryOp::LessThanOrEqual
                         | BinaryOp::Equal => Ok(Type::Bool),
-                        _ => Ok(l_base), // For other ops like +, -, *, /, return the base type
+                        BinaryOp::Modulo => {
+                            if l_base != Type::I32 && l_base != Type::I64 {
+                                return self.analysis_info.semantic_error(
+                                    "Modulo (%) can only be used on integers (for now)".into(),
+                                    span,
+                                );
+                            }
+                            Ok(l_base)
+                        }
+                        BinaryOp::AddAssign | _ => Ok(l_base),
+                        // For other ops like +, -, *, /, return the base type
                     }
                 }
             }
@@ -115,39 +153,86 @@ impl<'a> ExpressionAnalyzer<'a> {
                     self.analyze_expr(arg)?;
                 }
                 // Macro return types are simplified for now
-                if name == "typeof" {
-                    Ok(Type::Str)
-                } else if name == "str" {
-                    Ok(Type::String) // str!() returns owned string
+
+                let _type = match name.as_str() {
+                    "tyepof" => Type::Str,
+                    "str" => Type::Str,
+                    "vec" => Type::Any,
+                    "println" | "print" => Type::Unit,
+                    _ => {
+                        // Trust other macros for now
+                        Type::Any
+                    }
+                };
+                Ok(_type)
+            }
+            ExprKind::Array(items) => {
+                if items.is_empty() {
+                    Ok(Type::Array(Box::new(Type::Any), 0))
                 } else {
-                    Ok(Type::I32) // Default to I32 or Unit for other macros
+                    let first_ty = self.analyze_expr(&mut items[0])?;
+                    for item in items.iter_mut().skip(1) {
+                        let ty = self.analyze_expr(item)?;
+                        if !self.analysis_info.types_equal(&first_ty, &ty)
+                            && first_ty != Type::Any
+                            && ty != Type::Any
+                        {
+                            return self.analysis_info.semantic_error(
+                                format!(
+                                    "Mismatched types in array literal: {:?} and {:?}",
+                                    first_ty, ty
+                                ),
+                                span,
+                            );
+                        }
+                    }
+                    Ok(Type::Array(Box::new(first_ty), items.len()))
                 }
             }
+            ExprKind::Block(stmts) => {
+                use crate::sema::analysis::statements::StatementAnalyzer;
+                let mut last_ty = Type::Unit;
+                {
+                    let mut sa = StatementAnalyzer::new(self.analysis_info, self.type_info);
+                    for stmt in stmts {
+                        sa.analyze_stmt(stmt)?;
+                        if let StmtKind::ExprStmt(ref e) = stmt.kind {
+                            last_ty = e.ty.clone().unwrap_or(Type::Unit);
+                        } else {
+                            last_ty = Type::Unit;
+                        }
+                    }
+                }
+                Ok(last_ty)
+            }
             ExprKind::Call(path, args, resolved_name, arg_kinds, param_types_field) => {
-                let name = self.analysis_info.path_to_string(path);
+                let name = self.analysis_info.path_to_string(path, self.type_info);
                 //println!("DEBUG analyze Call name={}, current_prefix={}", name, self.analysis_info.current_prefix);
 
                 // Handle special calls like Ok() and Err()
                 if name == "Ok" {
                     let val_ty = self.analyze_expr(&mut args[0])?;
-                    let ty = Type::Result(
-                        Box::new(val_ty),
-                        Box::new(Type::Generic("E".into())),
-                    );
-                    expr.ty = Some(ty.clone());
+                    let ty = Type::Result(Box::new(val_ty), Box::new(Type::Generic("E".into())));
                     return Ok(ty);
                 } else if name == "Err" {
                     let err_ty = self.analyze_expr(&mut args[0])?;
-                    let ty = Type::Result(
-                        Box::new(Type::Generic("T".into())),
-                        Box::new(err_ty),
-                    );
-                    expr.ty = Some(ty.clone());
+                    let ty = Type::Result(Box::new(Type::Generic("T".into())), Box::new(err_ty));
                     return Ok(ty);
                 } else if name == "array_init" {
                     let val_ty = self.analyze_expr(&mut args[0])?;
-                    let ty = Type::RawPtr(Box::new(val_ty), true);
-                    expr.ty = Some(ty.clone());
+                    let _size_ty = self.analyze_expr(&mut args[1])?;
+
+                    // Try to extract a constant size if possible
+                    let (size, is_dynamic) = match &args[1].kind {
+                        ExprKind::Int(v) => (*v as usize, *v == 0),
+                        _ => (0, true), // Dynamic size (Vector<T>)
+                    };
+
+                    if is_dynamic || size == 0 {
+                        return Ok(Type::Custom("std::vec::Vector<>".into(), vec![val_ty]));
+                    }
+
+                    let ty = Type::Array(Box::new(val_ty), size);
                     return Ok(ty);
                 }
 
@@ -166,9 +251,132 @@ impl<'a> ExpressionAnalyzer<'a> {
                         Some((name_to_lookup.clone(), param_types.clone(), rt.clone()));
                 } else if let Some((param_types, rt)) = self.type_info.functions.get(&name) {
                     found_name_and_ret = Some((name.clone(), param_types.clone(), rt.clone()));
+                } else if let Some((param_types, rt)) = self
+                    .type_info
+                    .functions
+                    .get(&format!("{}<>", name_to_lookup))
+                {
+                    found_name_and_ret = Some((
+                        format!("{}<>", name_to_lookup),
+                        param_types.clone(),
+                        rt.clone(),
+                    ));
+                } else if let Some((param_types, rt)) =
+                    self.type_info.functions.get(&format!("{}<>", name))
+                {
+                    found_name_and_ret =
+                        Some((format!("{}<>", name), param_types.clone(), rt.clone()));
+                } else {
+                    // Try removing :: parts to see if it's a method on a generic type that was registered with <>
+                    // e.g. std::vec::Vector::new -> std::vec::Vector<>::new
+                    if name_to_lookup.contains("::") {
+                        let parts: Vec<_> = name_to_lookup.split("::").collect();
+                        if parts.len() >= 2 {
+                            let (target, method) = parts.split_at(parts.len() - 1);
+                            let alt_name = format!("{}<>::{}", target.join("::"), method[0]);
+                            if let Some((param_types, rt)) = self.type_info.functions.get(&alt_name)
+                            {
+                                found_name_and_ret =
+                                    Some((alt_name, param_types.clone(), rt.clone()));
+                            }
+                        }
+                    }
+                    if found_name_and_ret.is_none() && name.contains("::") {
+                        let parts: Vec<_> = name.split("::").collect();
+                        if parts.len() >= 2 {
+                            let (target, method) = parts.split_at(parts.len() - 1);
+                            let alt_name = format!("{}<>::{}", target.join("::"), method[0]);
+                            if let Some((param_types, rt)) = self.type_info.functions.get(&alt_name)
+                            {
+                                found_name_and_ret =
+                                    Some((alt_name, param_types.clone(), rt.clone()));
+                            }
+                        }
+                    }
                 }
 
                 if found_name_and_ret.is_none() {
+                    // Try looking up in enums
+                    if name_to_lookup.contains("::") {
+                        let parts: Vec<_> = name_to_lookup.split("::").collect();
+                        if parts.len() >= 2 {
+                            let (enum_parts, variant) = parts.split_at(parts.len() - 1);
+                            let mut enum_name = enum_parts.join("::");
+                            if !enum_name.contains('<') {
+                                enum_name = format!("{}<>", enum_name);
+                            }
+                            if let Some((variants, generics, _)) =
+                                self.type_info.enums.get(&enum_name)
+                            {
+                                if let Some(_variant_params) = variants.get(variant[0]) {
+                                    // Found an enum variant!
+                                    // For now, return the custom type.
+                                    // TODO: Proper variant parameter check and generic resolution.
+                                    let mut resolved_generics = Vec::new();
+                                    for (gname, _) in generics {
+                                        resolved_generics.push(Type::Generic(gname.clone()));
+                                    }
+                                    return Ok(Type::Custom(enum_name, resolved_generics));
+                                }
+                            }
+                        }
+                    }
+                    if name.contains("::") {
+                        let parts: Vec<_> = name.split("::").collect();
+                        if parts.len() >= 2 {
+                            let (enum_parts, variant) = parts.split_at(parts.len() - 1);
+                            let mut enum_name = enum_parts.join("::");
+                            if !enum_name.contains('<') {
+                                enum_name = format!("{}<>", enum_name);
+                            }
+                            if let Some((variants, generics, _)) =
+                                self.type_info.enums.get(&enum_name)
+                            {
+                                if let Some(_variant_params) = variants.get(variant[0]) {
+                                    let mut resolved_generics = Vec::new();
+                                    for (gname, _) in generics {
+                                        resolved_generics.push(Type::Generic(gname.clone()));
+                                    }
+                                    return Ok(Type::Custom(enum_name, resolved_generics));
+                                }
+                            }
+                        }
+                    }
+                }
+
+                if found_name_and_ret.is_none() {
+                    // Trust calls on objects with attributes (e.g., @derive)
+                    let mut obj_name = None;
+                    if name.contains("::") {
+                        let parts: Vec<_> = name.split("::").collect();
+                        obj_name = Some(parts[..parts.len() - 1].join("::"));
+                    } else if name_to_lookup.contains("::") {
+                        let parts: Vec<_> = name_to_lookup.split("::").collect();
+                        obj_name = Some(parts[..parts.len() - 1].join("::"));
+                    }
+
+                    if let Some(oname) = obj_name {
+                        let oname_with_gens = if oname.contains('<') {
+                            oname.clone()
+                        } else {
+                            format!("{}<>", oname)
+                        };
+                        if let Some((_, _, attrs)) = self
+                            .type_info
+                            .objects
+                            .get(&oname)
+                            .or(self.type_info.objects.get(&oname_with_gens))
+                        {
+                            if !attrs.is_empty() {
+                                for arg in args.iter_mut() {
+                                    self.analyze_expr(arg)?;
+                                }
+                                *resolved_name = Some(name.clone());
+                                return Ok(Type::Any);
+                            }
+                        }
+                    }
+
                     // Handle phantom types and functions
                     let is_phantom = path.iter().any(|p| self.type_info.is_phantom_type(&p.name));
                     if is_phantom || self.type_info.has_wildcard_phantom {
@@ -177,7 +385,6 @@ impl<'a> ExpressionAnalyzer<'a> {
                         }
                         *resolved_name = Some(name.clone());
                         let ty = Type::Any;
-                        expr.ty = Some(ty.clone());
                         return Ok(ty);
                     }
 
@@ -187,13 +394,29 @@ impl<'a> ExpressionAnalyzer<'a> {
                     );
                 }
 
-                let (resolved_func_name, params, ret_type) = found_name_and_ret.unwrap();
-                //println!("DEBUG analyze Call resolved_func_name={}", resolved_func_name);
+                let (resolved_func_name, params, mut ret_type) = found_name_and_ret.unwrap();
+
+                // Generic substitution: replace Generic("T") with Any for now
+                if let Some(Type::Custom(name, generics)) = &mut ret_type {
+                    if (name == "std::vec::Vector<>" || name == "std::option::Option<>")
+                        && generics.len() == 1
+                    {
+                        if let Type::Generic(g) = &generics[0] {
+                            if g == "T" {
+                                generics[0] = Type::Any;
+                            }
+                        }
+                    }
+                }
+
+                // Ensure the expression itself has this type so compile_expr can see it
+                expr.ty = ret_type.clone();
+
                 *resolved_name = Some(resolved_func_name.clone());
-                
+
                 let p_types: Vec<Type> = params.iter().map(|(t, _)| t.clone()).collect();
                 let p_kinds: Vec<ArgKind> = params.iter().map(|(_, k)| *k).collect();
-                
+
                 *param_types_field = Some(p_types);
                 *arg_kinds = Some(p_kinds);
 
@@ -204,10 +427,21 @@ impl<'a> ExpressionAnalyzer<'a> {
 
                 Ok(ret_type.unwrap_or(Type::I32)) // Simplified return type
             }
-            ExprKind::MethodCall(lhs, name, args, resolved_obj_name, arg_kinds, param_types_field) => {
+            ExprKind::MethodCall(
+                lhs,
+                name,
+                args,
+                resolved_obj_name,
+                arg_kinds,
+                param_types_field,
+            ) => {
                 let mut lhs_ty = self.analyze_expr(lhs)?;
-                // println!("DEBUG analyze MethodCall name={}, lhs_ty={:?}", name, lhs_ty);
-                let resolved_lhs_ty = self.type_info.resolve_type(&lhs_ty, &self.analysis_info.current_prefix);
+                let resolved_lhs = self
+                    .type_info
+                    .resolve_type(&lhs_ty, &self.analysis_info.current_prefix);
+                let actual_ty = self.analysis_info.deref_type(&resolved_lhs);
+
+                let resolved_lhs_ty = unwrap_type(&actual_ty).to_owned();
 
                 if resolved_lhs_ty == Type::Any {
                     for arg in args.iter_mut() {
@@ -215,13 +449,11 @@ impl<'a> ExpressionAnalyzer<'a> {
                     }
                     *resolved_obj_name = Some("any".to_string());
                     let ty = Type::Any;
-                    expr.ty = Some(ty.clone());
                     return Ok(ty);
                 }
 
                 if name == "clone" {
                     // Special handling for clone
-                    expr.ty = Some(resolved_lhs_ty.clone());
                     return Ok(resolved_lhs_ty);
                 }
 
@@ -231,21 +463,21 @@ impl<'a> ExpressionAnalyzer<'a> {
                         self.analyze_expr(arg)?;
                     }
                     let ty = Type::Any;
-                    expr.ty = Some(ty.clone());
                     return Ok(ty);
                 }
 
                 // Dereference to get the actual object type for method lookup
                 let actual_ty = self.analysis_info.deref_type(&resolved_lhs_ty);
 
-                let obj_name = match &actual_ty {
+                let unwrapped_ty = unwrap_type(&actual_ty).to_owned();
+
+                let obj_name = match &unwrapped_ty {
                     Type::Str => "str".to_string(),
-                    Type::String => "string".to_string(),
                     Type::I32 => "i32".to_string(), // Primitive types may have methods
                     Type::I64 => "i64".to_string(),
                     Type::F32 => "f32".to_string(),
                     Type::F64 => "f64".to_string(),
-                    Type::Array(_, _) => "vector".to_string(), // Treat array as vector for method lookup
+                    Type::Array(_, _) => "Array".to_string(), // Treat array as Array for method lookup
                     Type::Custom(n, _) => n.clone(),
                     Type::Generic(n) => {
                         // If it's a generic type, we need to look up method in its bounds
@@ -286,16 +518,24 @@ impl<'a> ExpressionAnalyzer<'a> {
                 {
                     let p_types: Vec<Type> = params.iter().map(|(t, _)| t.clone()).collect();
                     let p_kinds: Vec<ArgKind> = params.iter().map(|(_, k)| *k).collect();
-                    
+
                     *param_types_field = Some(p_types);
                     *arg_kinds = Some(p_kinds);
-                    
+
                     let ty = ret_type.unwrap_or(Type::I32);
-                    expr.ty = Some(ty.clone());
                     return Ok(ty);
                 } else if self.type_info.has_wildcard_phantom {
                     // Fallback to Any if not found but phantom mode is active
                     return Ok(Type::Any);
+                } else if let Some((_, _, attrs)) = self.type_info.objects.get(&obj_name) {
+                    if !attrs.is_empty() {
+                        // Trust that the derive macro generates this method
+                        return Ok(Type::Any);
+                    }
+                    return self.analysis_info.semantic_error(
+                        format!("No method '{}' found on type '{}'", name, obj_name),
+                        span,
+                    );
                 } else {
                     return self.analysis_info.semantic_error(
                         format!("No method '{}' found on type '{}'", name, obj_name),
@@ -308,16 +548,17 @@ impl<'a> ExpressionAnalyzer<'a> {
                 fields,
                 resolved_name,
             } => {
-                let name = self.analysis_info.path_to_string(path);
+                let name = self.analysis_info.path_to_string(path, self.type_info);
                 let is_phantom = path.iter().any(|p| self.type_info.is_phantom_type(&p.name));
-                
+
                 // Attempt to resolve struct name
                 let mut found = false;
-                let name_to_lookup = if !name.contains("::") && !self.analysis_info.current_prefix.is_empty() {
-                    format!("{}::{}", self.analysis_info.current_prefix, name)
-                } else {
-                    name.clone()
-                };
+                let name_to_lookup =
+                    if !name.contains("::") && !self.analysis_info.current_prefix.is_empty() {
+                        format!("{}::{}", self.analysis_info.current_prefix, name)
+                    } else {
+                        name.clone()
+                    };
 
                 if self.type_info.objects.contains_key(&name_to_lookup) {
                     *resolved_name = Some(name_to_lookup.clone());
@@ -334,14 +575,12 @@ impl<'a> ExpressionAnalyzer<'a> {
                         }
                         *resolved_name = Some(name.clone());
                         let ty = Type::Any;
-                        expr.ty = Some(ty.clone());
                         return Ok(ty);
                     }
 
-                    return self.analysis_info.semantic_error(
-                        format!("Undeclared object type '{}'", name),
-                        span,
-                    );
+                    return self
+                        .analysis_info
+                        .semantic_error(format!("Undeclared object type '{}'", name), span);
                 }
 
                 let final_name = resolved_name.as_ref().unwrap().clone();
@@ -359,7 +598,9 @@ impl<'a> ExpressionAnalyzer<'a> {
                 if lhs_ty == Type::Any {
                     Ok(Type::Any)
                 } else {
-                    let resolved_lhs = self.type_info.resolve_type(&lhs_ty, &self.analysis_info.current_prefix);
+                    let resolved_lhs = self
+                        .type_info
+                        .resolve_type(&lhs_ty, &self.analysis_info.current_prefix);
                     let actual_ty = self.analysis_info.deref_type(&resolved_lhs);
 
                     match actual_ty {
@@ -369,13 +610,20 @@ impl<'a> ExpressionAnalyzer<'a> {
                                     Ok(ty.clone())
                                 } else {
                                     self.analysis_info.semantic_error(
-                                        format!("Tuple index {} out of bounds (len: {})", idx, types.len()),
+                                        format!(
+                                            "Tuple index {} out of bounds (len: {})",
+                                            idx,
+                                            types.len()
+                                        ),
                                         span,
                                     )
                                 }
                             } else {
                                 self.analysis_info.semantic_error(
-                                    format!("Tuple access must be a numeric index, found '{}'", name),
+                                    format!(
+                                        "Tuple access must be a numeric index, found '{}'",
+                                        name
+                                    ),
                                     span,
                                 )
                             }
@@ -385,7 +633,7 @@ impl<'a> ExpressionAnalyzer<'a> {
                                 return Ok(Type::Any);
                             }
                             // Lookup member in objects map from type_info
-                            if let Some((fields, _)) = self.type_info.objects.get(obj_name) {
+                            if let Some((fields, _, _)) = self.type_info.objects.get(obj_name) {
                                 if let Some(field_ty) = fields.get(name) {
                                     Ok(field_ty.clone())
                                 } else {
@@ -427,6 +675,11 @@ impl<'a> ExpressionAnalyzer<'a> {
                         | Type::ThreadSafe(inner)
                         | Type::Array(inner, _) => {
                             Ok(*inner) // Return the inner type
+                        }
+                        Type::Custom(name, generics)
+                            if name == "vec::Vector<>" && !generics.is_empty() =>
+                        {
+                            Ok(generics[0].clone())
                         }
                         _ => self.analysis_info.semantic_error(
                             "Indexing only supported on array, pointer, or reference types".into(),
@@ -517,13 +770,12 @@ impl<'a> ExpressionAnalyzer<'a> {
             ExprKind::Cast(inner, ty) => {
                 self.analyze_expr(inner)?;
                 // Resolve the target type. Requires resolve_type.
-                let resolved_ty = self.type_info.resolve_type(ty, &self.analysis_info.current_prefix);
+                let resolved_ty = self
+                    .type_info
+                    .resolve_type(ty, &self.analysis_info.current_prefix);
                 Ok(resolved_ty)
             }
-        }?;
-        //println!("DEBUG analyze_expr setting ty for {:?}: {:?}", expr.kind, ty);
-        expr.ty = Some(ty.clone());
-        Ok(ty)
+        }
     }
 
     pub fn refine_expr(&mut self, expr: &mut Expr) -> Result<(), CompilerError> {
@@ -532,9 +784,18 @@ impl<'a> ExpressionAnalyzer<'a> {
                 self.refine_expr(lhs)?;
                 self.refine_expr(rhs)?;
             }
-            ExprKind::Call(_, args, _, _, _) | ExprKind::MacroCall(_, args) => {
+            ExprKind::Call(_, args, _, _, _)
+            | ExprKind::MacroCall(_, args)
+            | ExprKind::Array(args) => {
                 for arg in args {
                     self.refine_expr(arg)?;
+                }
+            }
+            ExprKind::Block(stmts) => {
+                use crate::sema::analysis::statements::StatementAnalyzer;
+                let mut sa = StatementAnalyzer::new(self.analysis_info, self.type_info);
+                for stmt in stmts {
+                    sa.refine_stmt(stmt)?;
                 }
             }
             ExprKind::MethodCall(lhs, _, args, _, _, _) => {
@@ -564,5 +825,14 @@ impl<'a> ExpressionAnalyzer<'a> {
             _ => {} // Do nothing for other expression kinds
         }
         Ok(())
+    }
+}
+
+// Helper function to strip type wrappers in sema:
+fn unwrap_type(ty: &Type) -> &Type {
+    match ty {
+        Type::Owned(inner) => unwrap_type(inner),
+        Type::Ref(inner, _) => unwrap_type(inner),
+        _ => ty,
     }
 }

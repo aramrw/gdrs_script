@@ -1,0 +1,36 @@
+use std::vec::Vector
+use std::option::Option
+
+fn main():
+    var v: Vector<i32> = Vector::new()
+    v.push(1)
+    v.push(2)
+    v.push(3)
+
+    println!("Iterating over Vector:")
+    for x in v:
+        println!("Value: {}", x)
+
+    println!("Custom iterator implementation:")
+    var counter = Counter::new(5)
+    for c in counter:
+        println!("Counter: {}", c)
+
+obj Counter:
+    count: i32
+    max: i32
+
+impl Counter:
+    fn new(max: i32) -> Counter:
+        return Counter{count: 0, max: max}
+
+impl Iterator for Counter:
+    type Item = i32
+    
+    fn next(&mut self) -> Option<i32>:
+        if (self.count < self.max):
+            var res = self.count
+            self.count = self.count + 1
+            return Option::Some(res)
+        else:
+            return Option::None

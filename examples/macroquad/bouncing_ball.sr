@@ -1,0 +1,28 @@
+rust dependency macroquad = "0.4"
+use rust::macroquad::prelude::*;
+
+#[macroquad::main("Bouncing Ball")]
+async fn main():
+    var mut x = screen_width() / 2.0
+    var mut y = screen_height() / 2.0
+    var mut dx = 5.0
+    var mut dy = 5.0
+    var radius = 20.0
+
+    loop:
+        clear_background(DARKGRAY)
+
+        x += dx
+        y += dy
+
+        if x <= radius || x >= screen_width() - radius:
+            dx *= -1.0
+        else:
+            println!("x is in bounds")
+
+        if y <= radius || y >= screen_height() - radius:
+            dy *= -1.0
+
+        draw_circle(x, y, radius, RED)
+
+        next_frame().await

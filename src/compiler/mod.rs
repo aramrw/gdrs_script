@@ -19,6 +19,7 @@ use crate::compiler::declarations::{collect_decl_metadata, compile_decls};
 use crate::compiler::expressions::compile_expr;
 use crate::compiler::statements::compile_stmt;
 use crate::compiler::types::compile_type_ext;
+use crate::sema::TypeInfo;
 
 lazy_static! {
     pub(crate) static ref RUST_MAPPINGS: Mutex<HashMap<String, String>> =
@@ -95,6 +96,9 @@ pub(crate) fn parse_generic_args(args_str: &str) -> Vec<TokenStream> {
 
 fn parse_single_generic(s: &str) -> TokenStream {
     let s = s.trim();
+    if s.is_empty() {
+        return quote!();
+    }
     if s.chars().all(|c| c.is_alphanumeric() || c == '_') {
         let gid = quote::format_ident!("{}", s);
         quote!(#gid)
@@ -103,6 +107,32 @@ fn parse_single_generic(s: &str) -> TokenStream {
             let gid = quote::format_ident!("{}", s);
             quote!(#gid)
         })
+    }
+}
+
+pub fn has_clone(ty: &Type, type_info: &TypeInfo) -> bool {
+    match ty {
+        Type::I32 | Type::I64 | Type::F32 | Type::F64 | Type::Bool => true,
+        Type::Str => true,
+        Type::Custom(name, _) => {
+            if let Some((_, _, attrs)) = type_info.objects.get(name) {
+                attrs.iter().any(|a| a.contains("Clone"))
+            } else if let Some((_, _, attrs)) = type_info.enums.get(name) {
+                attrs.iter().any(|a| a.contains("Clone"))
+            } else {
+                // If we don't know, we assume it's NOT cloneable for safety,
+                // UNLESS it's a known cloneable type like Vec
+                if name.contains("Vector") || name.contains("Vec") {
+                    return true;
+                }
+                false
+            }
+        }
+        Type::Generic(_) => true, // Generics are required to be Clone in Solar
+        Type::Result(ok, err) => has_clone(ok, type_info) && has_clone(err, type_info),
+        Type::Tuple(types) => types.iter().all(|t| has_clone(t, type_info)),
+        Type::Array(inner, _) => has_clone(inner, type_info),
+        _ => false,
     }
 }
 
@@ -116,14 +146,16 @@ pub(crate) fn compile_id_ext(name: &str, is_expr: bool) -> TokenStream {
     if let Some((prefix, gens_str, suffix)) = extract_brackets(name, '<', '>') {
         let id = compile_id_ext(prefix, is_expr);
         let gens_tokens = parse_generic_args(gens_str);
+        
+        let has_any = gens_str.contains("Any");
 
-        let sep = if is_expr && !gens_tokens.is_empty() {
+        let sep = if is_expr && !gens_tokens.is_empty() && !has_any {
             quote!(::)
         } else {
             quote!()
         };
 
-        let mut res = if gens_tokens.is_empty() {
+        let mut res = if gens_tokens.is_empty() || has_any {
             quote!(#id)
         } else {
             quote!(#id #sep <#( #gens_tokens ),*>)
@@ -177,16 +209,18 @@ pub(crate) fn compile_id_ext(name: &str, is_expr: bool) -> TokenStream {
 
     // 4. Resolve namespaces (::)
     if name.contains("::") {
-        let parts: Vec<&str> = name.split("::").collect();
+        let is_absolute = name.starts_with("::");
+        let name_trimmed = name.trim_start_matches("::");
+        let parts: Vec<&str> = name_trimmed.split("::").collect();
         let first = parts[0];
         let rest_tokens = crate::compiler::paths::format_path_parts(&parts[1..]);
 
-        match first {
-            // ZERO-COST ABSTRACTIONS: Direct access to Rust's std library!
-            "std" | "rust" => quote!(::std::#( #rest_tokens )::*),
+        let mut res = match first {
+            // ZERO-COST ABSTRACTIONS: Direct access to Rust's libraries!
+            "rust" => quote!(::#( #rest_tokens )::*),
 
-            // External crates via `crate::`
-            "crate" => quote!(::#( #rest_tokens )::*),
+            // Solar standard library extensions
+            "stext" => quote!(crate::#( #rest_tokens )::*),
 
             // Solar standard library mapped directly to the active crate
             "solar" => quote!(crate::#( #rest_tokens )::*),
@@ -209,7 +243,12 @@ pub(crate) fn compile_id_ext(name: &str, is_expr: bool) -> TokenStream {
                 let first_id = quote::format_ident!("{}", first);
                 quote!(#first_id::#( #rest_tokens )::*)
             }
+        };
+
+        if is_absolute && !res.to_string().starts_with("::") {
+            res = quote!(::#res);
         }
+        return res;
     } else {
         // 5. Single identifiers (no `::`)
         let clean_name = name.trim_end_matches("<>");
@@ -234,27 +273,44 @@ fn path_to_string(path: &[PathPart]) -> String {
         .join("::")
 }
 
-fn compile_path(path: &[PathPart], target_obj: Option<&String>) -> TokenStream {
-    let parts: Vec<_> = path
-        .iter()
-        .filter(|p| !p.name.is_empty())
-        .map(|p| {
-            let name_to_use = match p.name.as_str() {
-                "string" => "sr_string",
-                "fs" => "sr_fs",
-                "io" => "sr_io",
-                "math" => "sr_math",
-                _ => &p.name,
-            };
-            let name = quote::format_ident!("{}", name_to_use);
-            if p.generics.is_empty() {
-                quote!(#name)
+pub fn compile_path(path: &[PathPart], target_obj: Option<&String>, is_expr: bool) -> TokenStream {
+    let mut parts: Vec<TokenStream> = Vec::new();
+    let mut start_idx = 0;
+    
+    if let Some(first) = path.first() {
+        if first.name == "stext" {
+            parts.push(quote!(crate));
+            start_idx = 1;
+        } else if first.name == "rust" {
+            // "rust::" prefix means use native rust path directly, optionally keeping "std::"
+            // We just skip the "rust" part. The rest will be formatted as a normal rust path.
+            start_idx = 1;
+        }
+    }
+
+    for (i, p) in path.iter().enumerate().skip(start_idx) {
+        if p.name.is_empty() { continue; }
+        
+        let name_to_use = match p.name.as_str() {
+            "string" => "sr_string",
+            "fs" => "sr_fs",
+            "io" => "sr_io",
+            "math" => "sr_math",
+            _ => &p.name,
+        };
+        let name = quote::format_ident!("{}", name_to_use);
+        if p.generics.is_empty() || p.generics.iter().any(|g| matches!(g, Type::Any)) {
+            parts.push(quote!(#name));
+        } else {
+            let gens = p.generics.iter().map(|g| compile_type_ext(g, target_obj));
+            if is_expr && i == path.len() - 1 {
+                parts.push(quote!(#name::<#( #gens ),*>));
             } else {
-                let gens = p.generics.iter().map(|g| compile_type_ext(g, target_obj));
-                quote!(#name::<#( #gens ),*>)
+                parts.push(quote!(#name<#( #gens ),*>));
             }
-        })
-        .collect();
+        }
+    }
+    
     quote!(#( #parts )::*)
 }
 
@@ -262,7 +318,7 @@ fn compile_type(ty: &Type) -> TokenStream {
     compile_type_ext(ty, None)
 }
 
-fn compile_pattern(pat: &Pattern) -> TokenStream {
+fn compile_pattern(pat: &Pattern, type_info: &TypeInfo) -> TokenStream {
     match pat {
         Pattern::Variant(enm, var, params) => {
             let vid = quote::format_ident!("{}", var);
@@ -286,12 +342,12 @@ fn compile_pattern(pat: &Pattern) -> TokenStream {
             let id = quote::format_ident!("{}", n);
             quote!(#id)
         }
-        Pattern::Literal(lit) => compile_expr(lit, None, false),
+        Pattern::Literal(lit) => compile_expr(lit, None, false, type_info),
     }
 }
 
-fn wrap_expr_for_ref(expr: &Expr, expected_ty: Option<&Type>, target_obj: Option<&String>, mutable: bool) -> TokenStream {
-    let tokens = compile_expr(expr, target_obj, mutable);
+fn wrap_expr_for_ref(expr: &Expr, expected_ty: Option<&Type>, target_obj: Option<&String>, mutable_expr: bool, arg_kind: ArgKind, type_info: &TypeInfo) -> TokenStream {
+    let tokens = compile_expr(expr, target_obj, mutable_expr, type_info); // Use mutable_expr here
 
     if let Some(ty) = &expr.ty {
         match ty {
@@ -302,59 +358,77 @@ fn wrap_expr_for_ref(expr: &Expr, expected_ty: Option<&Type>, target_obj: Option
                 if !is_ptr_expected {
                     match ty {
                         Type::Managed(_) => {
-                            if mutable {
+                            if arg_kind == ArgKind::MutRef { // Use arg_kind here
                                 quote! { &mut *#tokens.borrow_mut() }
                             } else {
                                 quote! { &*#tokens.borrow() }
                             }
                         }
                         Type::ThreadSafe(_) => {
-                            if mutable {
+                            if arg_kind == ArgKind::MutRef { // Use arg_kind here
                                 quote! { &mut *#tokens.write() }
                             } else {
                                 quote! { &*#tokens.read() }
                             }
                         }
                         Type::BoxPtr(_) => {
-                            if mutable {
+                            if arg_kind == ArgKind::MutRef { // Use arg_kind here
                                 quote! { &mut **#tokens }
                             } else {
                                 quote! { &**#tokens }
                             }
                         }
-                        _ => quote! { &#tokens }
+                        _ => { // For other pointer types or just to generate a reference to the content
+                            if arg_kind == ArgKind::MutRef {
+                                quote! { &mut #tokens }
+                            } else {
+                                quote! { &#tokens }
+                            }
+                        }
                     }
                 } else {
                     // Function explicitly expects the pointer type, so pass a reference to it.
-                    quote! { &#tokens }
-                }
-            }
-            Type::Ref(_, _) => tokens, // Already a ref
-            _ => {
-                // If it's a Custom or Array type, it's almost certainly expected as a reference in a Solar function
-                let is_ref_expected = expected_ty.map_or(true, |et| {
-                    match et {
-                        Type::Ref(_, _) => true,
-                        Type::Custom(_, _) | Type::Array(_, _) | Type::Managed(_) | Type::ThreadSafe(_) | Type::BoxPtr(_) => true,
-                        _ => false,
-                    }
-                });
-                if is_ref_expected {
-                    if mutable {
+                    if arg_kind == ArgKind::MutRef { // Use arg_kind here
                         quote! { &mut #tokens }
                     } else {
                         quote! { &#tokens }
                     }
-                } else {
-                    quote! { (&#tokens).as_val() }
+                }
+            }
+            Type::Ref(_, _) => tokens, // Already a ref
+            _ => { // This is the case for non-pointer, non-reference types
+                match arg_kind {
+                    ArgKind::Value => {
+                        let ty = expr.ty.as_ref().unwrap_or(&Type::Any);
+                        let ct = compile_type_ext(ty, target_obj);
+                        match ty {
+                            Type::Str => {
+                                // If it's a Solar string literal and a Solar String type is expected (by value)
+                                if expected_ty.map_or(false, |et| matches!(et, Type::Str)) {
+                                    quote! { (&#tokens).solar_to_string() }
+                                } else {
+                                    // If a Str type is expected by value (e.g., &str), use solar_to_str
+                                    quote! { (&#tokens).solar_to_str() }
+                                }
+                            },
+                            Type::Custom(n, _) if n.contains("Option") || n.contains("Result") => {
+                                quote! { (#tokens) }
+                            }
+                            Type::Result(_, _) => quote! { (#tokens) },
+                            _ if has_clone(ty, type_info) => quote! { <_ as crate::SolarAsVal<#ct>>::as_val(&#tokens) },
+                            _ => quote! { (#tokens) }
+                        }
+                    }
+                    ArgKind::Ref => quote! { &#tokens },
+                    ArgKind::MutRef => quote! { &mut #tokens },
                 }
             }
         }
-    } else {
-        if mutable {
-            quote! { &mut #tokens }
-        } else {
-            quote! { &#tokens }
+    } else { // If expr.ty is None, meaning the type is unknown
+        match arg_kind {
+            ArgKind::Value => quote! { (#tokens) }, // Pass by value
+            ArgKind::Ref => quote! { &#tokens },
+            ArgKind::MutRef => quote! { &mut #tokens },
         }
     }
 }
@@ -380,7 +454,7 @@ fn compile_generics(generics: &[(String, Vec<String>)]) -> TokenStream {
 
 
 
-pub fn compile(program: Program, output_name: &str) {
+pub fn compile(program: Program, output_name: &str, type_info: &TypeInfo) {
     let mut tokens = TokenStream::new();
     let mut dependencies = Vec::new();
     let mut use_tokio = false;
@@ -406,7 +480,7 @@ pub fn compile(program: Program, output_name: &str) {
     let has_macroquad = dependencies.iter().any(|(n, _)| n == "macroquad");
     tokens.extend(generate_solar_std(has_macroquad));
 
-    compile_decls(&program.declarations, &mut tokens);
+    compile_decls(&program.declarations, &mut tokens, type_info);
 
     fs::write("output.rs", tokens.to_string()).expect("Failed to write Rust code");
 
@@ -480,8 +554,15 @@ panic = "abort"
     fs::write(format!("{}/src/main.rs", project_dir), tokens.to_string())
         .expect("Failed to write src/main.rs");
 
+    // Format the generated code for better error messages
+    Command::new("cargo")
+        .args(&["fmt"])
+        .current_dir(project_dir)
+        .status()
+        .ok();
+
     println!("+=[Cargo]");
-    let mut args = vec!["build", "--message-format=short"];
+    let mut args = vec!["build"];
     if has_macroquad {
         args.push("--features");
         args.push("macroquad");

@@ -12,19 +12,15 @@ pub fn compile_type_ext(ty: &Type, target_obj: Option<&String>) -> TokenStream {
         Type::F64 => quote!(f64),
         Type::Bool => quote!(bool),
         Type::Str => quote!(::std::string::String),
-        Type::String => quote!(::std::string::String),
         Type::File => quote!(::std::fs::File),
+        Type::Owned(inner) => compile_type_ext(inner, target_obj),
         Type::BoxPtr(inner) => {
             let t = compile_type_ext(inner, target_obj);
             quote!(Box<#t>)
         }
         Type::Array(inner, size) => {
             let t = compile_type_ext(inner, target_obj);
-            if *size == 0 {
-                quote!(Vec<#t>)
-            } else {
-                quote!([#t; #size])
-            }
+            quote!([#t; #size])
         }
         Type::RawPtr(inner, mutable) => {
             let t = compile_type_ext(inner, target_obj);
@@ -35,11 +31,15 @@ pub fn compile_type_ext(ty: &Type, target_obj: Option<&String>) -> TokenStream {
             }
         }
         Type::Ref(inner, mutable) => {
-            let t = compile_type_ext(inner, target_obj);
-            if *mutable {
-                quote!(&mut #t)
+            if !*mutable && matches!(**inner, Type::Str) {
+                quote!(&str)
             } else {
-                quote!(&#t)
+                let t = compile_type_ext(inner, target_obj);
+                if *mutable {
+                    quote!(&mut #t)
+                } else {
+                    quote!(&#t)
+                }
             }
         }
         Type::Managed(inner) => {
@@ -84,11 +84,15 @@ pub fn compile_type_ext(ty: &Type, target_obj: Option<&String>) -> TokenStream {
                     let parts: Vec<_> = obj.split('<').collect();
                     let id = compile_id(parts[0]);
                     let gens_str = parts[1].trim_end_matches('>');
-                    let gens_tokens: Vec<_> = gens_str.split(',').map(|s| {
-                        let s = s.trim();
-                        let gid = quote::format_ident!("{}", s);
-                        quote!(#gid)
-                    }).collect();
+                    let gens_tokens: Vec<_> = gens_str
+                        .split(',')
+                        .map(|s| s.trim())
+                        .filter(|s| !s.is_empty())
+                        .map(|s| {
+                            let gid = quote::format_ident!("{}", s);
+                            quote!(#gid)
+                        })
+                        .collect();
                     quote!(#id<#( #gens_tokens ),*>)
                 } else {
                     let id = compile_id(obj);
