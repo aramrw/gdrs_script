@@ -1,9 +1,9 @@
-pub mod types;
-pub mod paths;
 pub mod declarations;
-pub mod statements;
 pub mod expressions;
 pub mod functions;
+pub mod paths;
+pub mod statements;
+pub mod types;
 
 use lazy_static::lazy_static;
 use proc_macro2::TokenStream;
@@ -31,6 +31,33 @@ pub fn compile_id(name: &str) -> TokenStream {
 }
 fn compile_id_expr(name: &str) -> TokenStream {
     compile_id_ext(name, true)
+}
+
+use std::collections::hash_map::DefaultHasher;
+use std::hash::{Hash, Hasher};
+
+/// Compute a hash of the Rust code and Cargo.toml
+fn compute_cache_key(rust_code: &str, cargo_toml: &str) -> String {
+    let mut hasher = DefaultHasher::new();
+    rust_code.hash(&mut hasher);
+    cargo_toml.hash(&mut hasher);
+    format!("{:x}", hasher.finish())
+}
+
+/// Check if we have a valid cache and return true if rebuild is needed
+fn should_rebuild(project_dir: &str, cache_key: &str) -> bool {
+    let cache_file = format!("{}/.solar_cache", project_dir);
+    if let Ok(cached_key) = fs::read_to_string(&cache_file) {
+        cached_key.trim() != cache_key
+    } else {
+        true // No cache file = always rebuild first time
+    }
+}
+
+/// Write the cache key after successful build
+fn save_cache(project_dir: &str, cache_key: &str) {
+    let cache_file = format!("{}/.solar_cache", project_dir);
+    fs::write(&cache_file, cache_key).ok();
 }
 
 /// Finds the contents of matching brackets, respecting nested depth.
@@ -146,7 +173,7 @@ pub(crate) fn compile_id_ext(name: &str, is_expr: bool) -> TokenStream {
     if let Some((prefix, gens_str, suffix)) = extract_brackets(name, '<', '>') {
         let id = compile_id_ext(prefix, is_expr);
         let gens_tokens = parse_generic_args(gens_str);
-        
+
         let has_any = gens_str.contains("Any");
 
         let sep = if is_expr && !gens_tokens.is_empty() && !has_any {
@@ -179,7 +206,11 @@ pub(crate) fn compile_id_ext(name: &str, is_expr: bool) -> TokenStream {
     // 3. Check explicit RUST_MAPPINGS
     if let Ok(mappings) = RUST_MAPPINGS.lock() {
         if name.contains("pi") {
-            println!("DEBUG compile_id_ext name={}, mappings has std::math::pi={:?}", name, mappings.get("std::math::pi"));
+            println!(
+                "DEBUG compile_id_ext name={}, mappings has std::math::pi={:?}",
+                name,
+                mappings.get("std::math::pi")
+            );
         }
         // adjust this import if needed
         // Exact Match
@@ -205,7 +236,17 @@ pub(crate) fn compile_id_ext(name: &str, is_expr: bool) -> TokenStream {
     }
 
     // Known Solar standard library root modules
-    let root_modules = ["mem", "sr_fs", "sr_io", "sr_math", "sr_string", "string", "util", "vec", "option"];
+    let root_modules = [
+        "mem",
+        "sr_fs",
+        "sr_io",
+        "sr_math",
+        "sr_string",
+        "string",
+        "util",
+        "vec",
+        "option",
+    ];
 
     // 4. Resolve namespaces (::)
     if name.contains("::") {
@@ -276,7 +317,7 @@ fn path_to_string(path: &[PathPart]) -> String {
 pub fn compile_path(path: &[PathPart], target_obj: Option<&String>, is_expr: bool) -> TokenStream {
     let mut parts: Vec<TokenStream> = Vec::new();
     let mut start_idx = 0;
-    
+
     if let Some(first) = path.first() {
         if first.name == "stext" {
             parts.push(quote!(crate));
@@ -289,8 +330,10 @@ pub fn compile_path(path: &[PathPart], target_obj: Option<&String>, is_expr: boo
     }
 
     for (i, p) in path.iter().enumerate().skip(start_idx) {
-        if p.name.is_empty() { continue; }
-        
+        if p.name.is_empty() {
+            continue;
+        }
+
         let name_to_use = match p.name.as_str() {
             "string" => "sr_string",
             "fs" => "sr_fs",
@@ -310,7 +353,7 @@ pub fn compile_path(path: &[PathPart], target_obj: Option<&String>, is_expr: boo
             }
         }
     }
-    
+
     quote!(#( #parts )::*)
 }
 
@@ -346,39 +389,52 @@ fn compile_pattern(pat: &Pattern, type_info: &TypeInfo) -> TokenStream {
     }
 }
 
-fn wrap_expr_for_ref(expr: &Expr, expected_ty: Option<&Type>, target_obj: Option<&String>, mutable_expr: bool, arg_kind: ArgKind, type_info: &TypeInfo) -> TokenStream {
+fn wrap_expr_for_ref(
+    expr: &Expr,
+    expected_ty: Option<&Type>,
+    target_obj: Option<&String>,
+    mutable_expr: bool,
+    arg_kind: ArgKind,
+    type_info: &TypeInfo,
+) -> TokenStream {
     let tokens = compile_expr(expr, target_obj, mutable_expr, type_info); // Use mutable_expr here
 
     if let Some(ty) = &expr.ty {
         match ty {
             Type::Managed(_) | Type::ThreadSafe(_) | Type::BoxPtr(_) => {
                 // If we have a pointer, but the function expects the inner type, auto-deref.
-                let is_ptr_expected = expected_ty.map_or(false, |et| matches!(et, Type::Managed(_) | Type::ThreadSafe(_) | Type::BoxPtr(_)));
-                
+                let is_ptr_expected = expected_ty.map_or(false, |et| {
+                    matches!(et, Type::Managed(_) | Type::ThreadSafe(_) | Type::BoxPtr(_))
+                });
+
                 if !is_ptr_expected {
                     match ty {
                         Type::Managed(_) => {
-                            if arg_kind == ArgKind::MutRef { // Use arg_kind here
+                            if arg_kind == ArgKind::MutRef {
+                                // Use arg_kind here
                                 quote! { &mut *#tokens.borrow_mut() }
                             } else {
                                 quote! { &*#tokens.borrow() }
                             }
                         }
                         Type::ThreadSafe(_) => {
-                            if arg_kind == ArgKind::MutRef { // Use arg_kind here
+                            if arg_kind == ArgKind::MutRef {
+                                // Use arg_kind here
                                 quote! { &mut *#tokens.write() }
                             } else {
                                 quote! { &*#tokens.read() }
                             }
                         }
                         Type::BoxPtr(_) => {
-                            if arg_kind == ArgKind::MutRef { // Use arg_kind here
+                            if arg_kind == ArgKind::MutRef {
+                                // Use arg_kind here
                                 quote! { &mut **#tokens }
                             } else {
                                 quote! { &**#tokens }
                             }
                         }
-                        _ => { // For other pointer types or just to generate a reference to the content
+                        _ => {
+                            // For other pointer types or just to generate a reference to the content
                             if arg_kind == ArgKind::MutRef {
                                 quote! { &mut #tokens }
                             } else {
@@ -388,7 +444,8 @@ fn wrap_expr_for_ref(expr: &Expr, expected_ty: Option<&Type>, target_obj: Option
                     }
                 } else {
                     // Function explicitly expects the pointer type, so pass a reference to it.
-                    if arg_kind == ArgKind::MutRef { // Use arg_kind here
+                    if arg_kind == ArgKind::MutRef {
+                        // Use arg_kind here
                         quote! { &mut #tokens }
                     } else {
                         quote! { &#tokens }
@@ -396,7 +453,8 @@ fn wrap_expr_for_ref(expr: &Expr, expected_ty: Option<&Type>, target_obj: Option
                 }
             }
             Type::Ref(_, _) => tokens, // Already a ref
-            _ => { // This is the case for non-pointer, non-reference types
+            _ => {
+                // This is the case for non-pointer, non-reference types
                 match arg_kind {
                     ArgKind::Value => {
                         let ty = expr.ty.as_ref().unwrap_or(&Type::Any);
@@ -410,13 +468,15 @@ fn wrap_expr_for_ref(expr: &Expr, expected_ty: Option<&Type>, target_obj: Option
                                     // If a Str type is expected by value (e.g., &str), use solar_to_str
                                     quote! { (&#tokens).solar_to_str() }
                                 }
-                            },
+                            }
                             Type::Custom(n, _) if n.contains("Option") || n.contains("Result") => {
                                 quote! { (#tokens) }
                             }
                             Type::Result(_, _) => quote! { (#tokens) },
-                            _ if has_clone(ty, type_info) => quote! { <_ as crate::SolarAsVal<#ct>>::as_val(&#tokens) },
-                            _ => quote! { (#tokens) }
+                            _ if has_clone(ty, type_info) => {
+                                quote! { <_ as crate::SolarAsVal<#ct>>::as_val(&#tokens) }
+                            }
+                            _ => quote! { (#tokens) },
                         }
                     }
                     ArgKind::Ref => quote! { &#tokens },
@@ -424,7 +484,8 @@ fn wrap_expr_for_ref(expr: &Expr, expected_ty: Option<&Type>, target_obj: Option
                 }
             }
         }
-    } else { // If expr.ty is None, meaning the type is unknown
+    } else {
+        // If expr.ty is None, meaning the type is unknown
         match arg_kind {
             ArgKind::Value => quote! { (#tokens) }, // Pass by value
             ArgKind::Ref => quote! { &#tokens },
@@ -432,8 +493,6 @@ fn wrap_expr_for_ref(expr: &Expr, expected_ty: Option<&Type>, target_obj: Option
         }
     }
 }
-
-
 
 fn compile_generics(generics: &[(String, Vec<String>)]) -> TokenStream {
     if generics.is_empty() {
@@ -451,8 +510,6 @@ fn compile_generics(generics: &[(String, Vec<String>)]) -> TokenStream {
         quote!(<#( #gids ),*>)
     }
 }
-
-
 
 pub fn compile(program: Program, output_name: &str, type_info: &TypeInfo) {
     let mut tokens = TokenStream::new();
@@ -489,7 +546,8 @@ pub fn compile(program: Program, output_name: &str, type_info: &TypeInfo) {
     fs::create_dir_all(format!("{}/src", project_dir)).ok();
 
     let mut cargo_toml = String::from(
-        r#"
+        r#"cargo-features = ["codegen-backend"]
+
 [package]
 name = "solar_out"
 version = "0.1.0"
@@ -531,9 +589,11 @@ thiserror = "1.0"
     }
 
     // Add profile optimizations for faster compilation
+    // Add profile optimizations for faster compilation
     cargo_toml.push_str(
         r#"
 [profile.dev]
+codegen-backend = "cranelift"
 opt-level = 0
 debug = true
 split-debuginfo = "unpacked"
@@ -548,21 +608,44 @@ panic = "abort"
 "#,
     );
 
-    fs::write(format!("{}/Cargo.toml", project_dir), cargo_toml)
+    let rust_code = tokens.to_string();
+
+    // ===== CACHE CHECK =====
+    let cache_key = compute_cache_key(&rust_code, &cargo_toml);
+    let rebuild_needed = should_rebuild(project_dir, &cache_key);
+    // ===== END CACHE CHECK =====
+
+    fs::write(format!("{}/Cargo.toml", project_dir), &cargo_toml)
         .expect("Failed to write Cargo.toml");
 
-    fs::write(format!("{}/src/main.rs", project_dir), tokens.to_string())
+    fs::write(format!("{}/src/main.rs", project_dir), &rust_code)
         .expect("Failed to write src/main.rs");
 
     // Format the generated code for better error messages
     Command::new("cargo")
-        .args(&["fmt"])
+        .args(&["+nightly", "fmt"])
         .current_dir(project_dir)
         .status()
         .ok();
 
+    // Only run cargo if code or dependencies changed
+    if rebuild_needed {
+        build_args(output_name, has_macroquad, project_dir, &cache_key);
+    } else {
+        println!("+=[Cache Hit] Skipping cargo build");
+        // Binary already exists from previous build, just verify it
+        let dst_binary = output_name;
+        if !std::path::Path::new(dst_binary).exists() {
+            // If binary doesn't exist but cache says it's valid, force rebuild
+            println!("+=[Cargo] Binary missing, rebuilding...");
+            build_args(output_name, has_macroquad, project_dir, &cache_key);
+        }
+    }
+}
+
+fn build_args<'a>(output_name: &str, has_macroquad: bool, project_dir: &str, cache_key: &str) {
     println!("+=[Cargo]");
-    let mut args = vec!["build"];
+    let mut args = vec!["+nightly", "build", "-Z", "codegen-backend"];
     if has_macroquad {
         args.push("--features");
         args.push("macroquad");
@@ -574,13 +657,14 @@ panic = "abort"
         .expect("Failed to run cargo build");
 
     if status.success() {
+        save_cache(project_dir, &cache_key);
+
         let src_binary = format!("{}/target/debug/solar_out", project_dir);
-        let dst_binary = output_name;
-        if let Err(e) = fs::copy(&src_binary, dst_binary) {
-            eprintln!("Failed to copy binary to {}: {}", dst_binary, e);
+        let dst_binary = output_name.to_owned();
+        if let Err(e) = fs::copy(&src_binary, &dst_binary) {
+            panic!("Failed to copy binary to {}: {}", &dst_binary, e);
         }
     } else {
-        eprintln!("Cargo compilation failed.");
+        panic!("Cargo compilation failed.");
     }
 }
-

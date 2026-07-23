@@ -421,6 +421,17 @@ pub fn compile_expr(
             let i = compile_expr(index, target_obj, false, type_info);
             quote! { (#l)[crate::SolarAsSize::as_size(&(#i))] }
         }
+        // Transpile Borrow (&x or &mut x)
+        ExprKind::Borrow(inner_expr, is_mut_borrow) => {
+            let e = compile_expr(inner_expr, target_obj, false, type_info);
+            if *is_mut_borrow {
+                quote! { (&mut #e) }
+            } else {
+                quote! { (&#e) }
+            }
+        }
+
+        // Transpile Cast (x as T)
         ExprKind::Cast(inner, ty) => {
             let e = compile_expr(inner, target_obj, false, type_info);
             let t = compile_type_ext(ty, target_obj);
@@ -549,14 +560,6 @@ pub fn compile_expr(
                     })
                     .collect::<Vec<_>>();
                 quote! { #name_id!(#( #args_compiled ),*) }
-            }
-        }
-        ExprKind::Borrow(inner, mutable) => {
-            let e = compile_expr(inner, target_obj, *mutable, type_info);
-            if *mutable {
-                quote!(&mut #e)
-            } else {
-                quote!(&#e)
             }
         }
         ExprKind::Deref(inner) => {

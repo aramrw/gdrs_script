@@ -524,6 +524,16 @@ impl<'a> ExpressionAnalyzer<'a> {
 
                     let ty = ret_type.unwrap_or(Type::I32);
                     return Ok(ty);
+                }
+                // FOR PRIMITIVE METHODS (f32, f64, i32, i64, etc.) ---
+                else if matches!(actual_ty, Type::F32 | Type::F64 | Type::I32 | Type::I64) {
+                    // Analyze arguments so child expressions are validated
+                    for arg in args.iter_mut() {
+                        self.analyze_expr(arg)?;
+                    }
+
+                    // Common float/int math methods return the same primitive type
+                    return Ok(actual_ty.clone());
                 } else if self.type_info.has_wildcard_phantom {
                     // Fallback to Any if not found but phantom mode is active
                     return Ok(Type::Any);
@@ -699,9 +709,33 @@ impl<'a> ExpressionAnalyzer<'a> {
                     AllocKind::Arc => Ok(Type::ThreadSafe(Box::new(base_ty))),
                 }
             }
-            ExprKind::Borrow(inner, mutable) => {
-                let ty = self.analyze_expr(inner)?;
-                Ok(Type::Ref(Box::new(ty), *mutable))
+            // Type-check Borrow (&x)
+            ExprKind::Borrow(inner_expr, is_mut) => {
+                let inner_ty = self.analyze_expr(inner_expr)?;
+                let ref_ty = Type::Ref(Box::new(inner_ty), *is_mut);
+                expr.ty = Some(ref_ty.clone());
+                Ok(ref_ty)
+            }
+
+            // Type-check Cast (x as T)
+            ExprKind::Cast(inner_expr, target_ty) => {
+                let inner_ty = self.analyze_expr(inner_expr)?;
+                let resolved_target = self
+                    .type_info
+                    .resolve_type(target_ty, &self.analysis_info.current_prefix);
+
+                match (&inner_ty, &resolved_target) {
+                    (Type::Ref(underlying, _), Type::RawPtr(ptr_underlying, _))
+                    | (Type::RawPtr(underlying, _), Type::RawPtr(ptr_underlying, _)) => {
+                        if !self.analysis_info.types_equal(underlying, ptr_underlying) {
+                            // Optional warning/error for pointer type mismatch
+                        }
+                    }
+                    _ => {}
+                }
+
+                expr.ty = Some(resolved_target.clone());
+                Ok(resolved_target)
             }
             ExprKind::Deref(inner) => {
                 let ty = self.analyze_expr(inner)?;
@@ -766,14 +800,6 @@ impl<'a> ExpressionAnalyzer<'a> {
                     .await_points
                     .push(self.analysis_info.scope_depth); // Record depth of await
                 Ok(ty)
-            }
-            ExprKind::Cast(inner, ty) => {
-                self.analyze_expr(inner)?;
-                // Resolve the target type. Requires resolve_type.
-                let resolved_ty = self
-                    .type_info
-                    .resolve_type(ty, &self.analysis_info.current_prefix);
-                Ok(resolved_ty)
             }
         }
     }

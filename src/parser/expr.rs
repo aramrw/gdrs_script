@@ -1,6 +1,5 @@
 use crate::ast::*;
 use crate::lexer::{Span, Token};
-use crate::parser::stmt::stmt_parser;
 use crate::parser::types::type_parser;
 use crate::parser::{ExprParserExt, ParserExt, ParserExtra, ident};
 use chumsky::input::ValueInput;
@@ -15,6 +14,9 @@ where
 {
     let ty = type_parser::<I>();
 
+    // -------------------------------------------------------------------------
+    // 0. High-Precedence Primitives & Path Helpers
+    // -------------------------------------------------------------------------
     let block_expr = stmt
         .clone()
         .repeated()
@@ -72,38 +74,6 @@ where
         }])),
     ))
     .into_expr();
-
-    let alloc_or_deref = just(Token::Star)
-        .ignore_then(choice((
-            just(Token::Box)
-                .to(AllocKind::Box)
-                .then(expr.clone().parens())
-                .map(|(_, e)| ExprKind::Alloc(Box::new(e), AllocKind::Box)),
-            just(Token::Mut)
-                .to(AllocKind::RawMut)
-                .then(expr.clone())
-                .map(|(_, e)| ExprKind::Alloc(Box::new(e), AllocKind::RawMut)),
-            just(Token::Const)
-                .to(AllocKind::RawConst)
-                .then(expr.clone())
-                .map(|(_, e)| ExprKind::Alloc(Box::new(e), AllocKind::RawConst)),
-            just(Token::Rc)
-                .to(AllocKind::Rc)
-                .then(expr.clone().parens())
-                .map(|(_, e)| ExprKind::Alloc(Box::new(e), AllocKind::Rc)),
-            just(Token::Arc)
-                .to(AllocKind::Arc)
-                .then(expr.clone().parens())
-                .map(|(_, e)| ExprKind::Alloc(Box::new(e), AllocKind::Arc)),
-            expr.clone().map(|e| ExprKind::Deref(Box::new(e))),
-        )))
-        .into_expr()
-        .boxed();
-
-    let downgrade = just(Token::Tilde)
-        .ignore_then(expr.clone())
-        .map(|e| ExprKind::Downgrade(Box::new(e)))
-        .into_expr();
 
     let array_init_or_literal = choice((
         expr.clone()
@@ -164,17 +134,6 @@ where
         })
         .into_expr();
 
-    let borrow = just(Token::Amp)
-        .ignore_then(just(Token::Mut).or_not())
-        .then(expr.clone())
-        .map(|(mut_kw, e)| ExprKind::Borrow(Box::new(e), mut_kw.is_some()))
-        .into_expr();
-
-    let negate = just(Token::Minus)
-        .ignore_then(expr.clone())
-        .map(|e| ExprKind::Negate(Box::new(e)))
-        .into_expr();
-
     let call_path = identifier_path
         .clone()
         .or(just(Token::Str).to(vec![PathPart {
@@ -220,19 +179,20 @@ where
         })
         .into_expr();
 
-    let term = choice((
+    // -------------------------------------------------------------------------
+    // 1. Base Terms
+    // -------------------------------------------------------------------------
+    let base_term = choice((
         struct_literal,
         namespaced_call,
-        borrow,
-        negate,
-        alloc_or_deref,
-        downgrade,
         array_init_or_literal,
         block_expr,
         val,
-        expr.clone().parens(),
     ));
 
+    // -------------------------------------------------------------------------
+    // 2. Suffixes (Member Access `.a`, Method Calls `.f()`, Indexing `[i]`, etc.)
+    // -------------------------------------------------------------------------
     #[derive(Clone)]
     enum Suffix {
         Method(String, Option<Vec<Expr>>),
@@ -240,7 +200,6 @@ where
         Try,
         TildeUnwrap,
         Await,
-        Cast(Type),
     }
 
     let suffix = choice((
@@ -263,17 +222,14 @@ where
         just(Token::Dot)
             .ignore_then(just(Token::Await))
             .to(Suffix::Await),
-        just(Token::As).ignore_then(ty.clone()).map(Suffix::Cast),
     ));
 
-    let atom = term.clone().foldl(suffix.repeated(), |lhs, suff| {
+    // -------------------------------------------------------------------------
+    // 3. Atom (Base term with attached suffixes)
+    // -------------------------------------------------------------------------
+    let atom = base_term.clone().foldl(suffix.repeated(), |lhs, suff| {
         let span = lhs.span;
         match suff {
-            Suffix::Cast(ty) => Expr {
-                kind: ExprKind::Cast(Box::new(lhs), ty),
-                span,
-                ty: None,
-            },
             Suffix::Await => Expr {
                 kind: ExprKind::Await(Box::new(lhs)),
                 span,
@@ -307,11 +263,77 @@ where
         }
     });
 
+    // -------------------------------------------------------------------------
+    // 4. Prefixes (&, *, -, ~) — Applied specifically to `atom`
+    // -------------------------------------------------------------------------
+    let alloc_or_deref = just(Token::Star)
+        .ignore_then(choice((
+            just(Token::Box)
+                .to(AllocKind::Box)
+                .then(expr.clone().parens())
+                .map(|(_, e)| ExprKind::Alloc(Box::new(e), AllocKind::Box)),
+            just(Token::Mut)
+                .to(AllocKind::RawMut)
+                .then(atom.clone())
+                .map(|(_, e)| ExprKind::Alloc(Box::new(e), AllocKind::RawMut)),
+            just(Token::Const)
+                .to(AllocKind::RawConst)
+                .then(atom.clone())
+                .map(|(_, e)| ExprKind::Alloc(Box::new(e), AllocKind::RawConst)),
+            just(Token::Rc)
+                .to(AllocKind::Rc)
+                .then(expr.clone().parens())
+                .map(|(_, e)| ExprKind::Alloc(Box::new(e), AllocKind::Rc)),
+            just(Token::Arc)
+                .to(AllocKind::Arc)
+                .then(expr.clone().parens())
+                .map(|(_, e)| ExprKind::Alloc(Box::new(e), AllocKind::Arc)),
+            atom.clone().map(|e| ExprKind::Deref(Box::new(e))),
+        )))
+        .into_expr()
+        .boxed();
+
+    let borrow = just(Token::Amp)
+        .ignore_then(just(Token::Mut).or_not())
+        .then(atom.clone())
+        .map(|(mut_kw, e)| ExprKind::Borrow(Box::new(e), mut_kw.is_some()))
+        .into_expr();
+
+    let negate = just(Token::Minus)
+        .ignore_then(atom.clone())
+        .map(|e| ExprKind::Negate(Box::new(e)))
+        .into_expr();
+
+    let downgrade = just(Token::Tilde)
+        .ignore_then(atom.clone())
+        .map(|e| ExprKind::Downgrade(Box::new(e)))
+        .into_expr();
+
+    let prefix_expr = choice((alloc_or_deref, borrow, negate, downgrade, atom));
+
+    // -------------------------------------------------------------------------
+    // 5. Casts (`as T`) — Binds broader than prefixes, narrower than binary ops
+    // -------------------------------------------------------------------------
+    let cast_expr = prefix_expr.clone().foldl(
+        just(Token::As).ignore_then(ty.clone()).repeated(),
+        |lhs, target_ty| {
+            let span = lhs.span;
+            Expr {
+                kind: ExprKind::Cast(Box::new(lhs), target_ty),
+                span,
+                ty: None,
+            }
+        },
+    );
+
+    // -------------------------------------------------------------------------
+    // 6. Binary Operators
+    // -------------------------------------------------------------------------
     let mul_op = choice((
         just(Token::Star).to(BinaryOp::Multiply),
-        just(Token::MulAssign).to(BinaryOp::MulAssign), 
+        just(Token::MulAssign).to(BinaryOp::MulAssign),
         just(Token::Div).to(BinaryOp::Divide),
-        just(Token::DivAssign).to(BinaryOp::DivAssign), 
+        just(Token::DivAssign).to(BinaryOp::DivAssign),
         just(Token::Modulo).to(BinaryOp::Modulo),
     ));
 
@@ -328,9 +350,9 @@ where
         just(Token::Lt).to(BinaryOp::LessThan),
     ));
 
-    let product = atom
+    let product = cast_expr
         .clone()
-        .foldl(mul_op.then(atom).repeated(), |lhs, (op, rhs)| {
+        .foldl(mul_op.then(cast_expr).repeated(), |lhs, (op, rhs)| {
             let span = lhs.span;
             Expr {
                 kind: ExprKind::Binary(Box::new(lhs), op, Box::new(rhs)),

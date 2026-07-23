@@ -11,6 +11,6 @@ def main [file: string, ...args: string] {
     if ($binary_name | path exists) {
         ^$"./($binary_name)" ...$args
         # 3. Clean up
-        rm $binary_name
+        # rm $binary_name
     }
 }

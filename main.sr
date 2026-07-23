@@ -1,32 +1,11 @@
-use rust::std::ops::Sub;
+use rust::std::prelude::*;
 
 #[derive(Clone, Debug)]
-obj Vec2:
-	x: f32
-	y: f32
-
-fn vec2(x: f32, y: f32) -> Vec2:
-		Vec2 { x, y }
-
-impl Vec2:
-	fn square(&self) -> Vec2:
-		var vec2 = Vec2 { x: self.x * self.x, y: self.y * self.y }
-		vec2
-
-
-impl Sub for Vec2:
-	type Output = Vec2;
-	fn sub(self, other: ^Vec2) -> Vec2:
-		Vec2 { 
-				x: self.x - other.x,
-				y: self.y - other.y
-			}
+obj Container:
+	a: i32
+	b: i32
+	c: i32
 
 fn main():
-	var v1 = vec2(10.0, 10.0)
-	var v2 = vec2(8.0, 8.0)
-
-	var sum = v1 - v2
-	dbg!(sum);
-	var squared = sum.square();
-	dbg!(squared);
+	var data = Container { a: 100, b: 200, c: 300 }
+	dbg!(data);
